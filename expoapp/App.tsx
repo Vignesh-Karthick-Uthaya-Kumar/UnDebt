@@ -1,16 +1,17 @@
-// App.tsx
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { User } from '@supabase/supabase-js';
 import { supabase, LOAN_TYPES, TRANSACTION_TYPES } from './lib/supabase';
 
 import AuthScreen from './components/AuthScreen';
 import ProfileModal from './components/ProfileModal';
 import AccountModal from './components/AccountModal';
+import Sidebar from './components/Sidebar';
+import DataTable from './components/DataTable';
+import ScreenHeader from './components/common/ScreenHeader';
+import MetricCard from './components/common/MetricCard';
 
 import OverviewScreen from './screens/OverviewScreen';
-import LoansScreen from './screens/LoansScreen';
-import TransactionsScreen from './screens/TransactionsScreen';
 import HelpScreen from './screens/HelpScreen';
 import SettingsScreen from './screens/SettingsScreen';
 
@@ -20,6 +21,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('loans');
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [data, setData] = useState<any[]>([]);
+  const { width } = useWindowDimensions();
 
   // Form States
   const [modalVisible, setModalVisible] = useState(false);
@@ -155,7 +157,7 @@ export default function App() {
   if (authLoading) {
     return (
       <View style={[styles.appContainer, styles.center]}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color="#5d55f7" />
       </View>
     );
   }
@@ -167,61 +169,69 @@ export default function App() {
 
   const totalDebt = loanAccounts.reduce((sum, item) => sum + Number(item.balance || 0), 0);
   const totalAssets = transactionAccounts.reduce((sum, item) => sum + Number(item.balance || 0), 0);
+  const totalRepayments = loanAccounts.reduce((sum, item) => sum + Number(item.payments?.[0]?.amount || 0), 0);
 
   return (
     <View style={styles.appContainer}>
-      {/* Top Header Bar */}
-      <View style={styles.headerBar}>
-        <Text style={styles.brandTitle}>Undebt Me</Text>
-        <TouchableOpacity style={styles.userBadge} onPress={() => setProfileModalVisible(true)}>
-          <Text style={styles.userBadgeText}>{user.email?.[0].toUpperCase()}</Text>
-          <Text style={styles.userEmailText}>{user.email}</Text>
-        </TouchableOpacity>
-      </View>
+      <Sidebar 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        userEmail={user.email} 
+        onOpenProfile={() => setProfileModalVisible(true)} 
+        loanCount={loanAccounts.length}
+      />
 
-      {/* Main Content Area */}
       <View style={styles.contentArea}>
         {activeTab === 'overview' && <OverviewScreen totalDebt={totalDebt} totalAssets={totalAssets} />}
+
         {activeTab === 'loans' && (
-          <LoansScreen 
-            loans={loanAccounts} 
-            onAdd={() => { resetForm('HomeLoan'); setModalVisible(true); }} 
-            onEdit={startEdit} 
-            onDelete={handleDelete} 
-          />
+          <View style={styles.screenWrapper}>
+            <ScreenHeader 
+              category="FINANCE" 
+              title="Loans" 
+              subtitle="Keep track of what you've borrowed and what's left to repay." 
+              buttonLabel="+ Add loan"
+              onPressButton={() => { resetForm('HomeLoan'); setModalVisible(true); }}
+            />
+
+            <View style={styles.metricsRow}>
+              <MetricCard title="Total outstanding" value={`$${totalDebt.toLocaleString()}`} subtitle={`Across ${loanAccounts.length} active loans`} />
+              <MetricCard title="Monthly repayments" value={`$${totalRepayments.toLocaleString()}`} subtitle="Estimated monthly total" />
+              <MetricCard title="Paid down" value="$0" subtitle="0% of principal" />
+            </View>
+
+            <DataTable 
+              sectionTitle="All loans" 
+              itemCountText={`${loanAccounts.length} active accounts`} 
+              data={loanAccounts} 
+              onEdit={startEdit} 
+              onDelete={handleDelete} 
+            />
+          </View>
         )}
+
         {activeTab === 'transactions' && (
-          <TransactionsScreen 
-            transactions={transactionAccounts} 
-            onAdd={() => { resetForm('Savings'); setModalVisible(true); }} 
-            onEdit={startEdit} 
-            onDelete={handleDelete} 
-          />
+          <View style={styles.screenWrapper}>
+            <ScreenHeader 
+              category="FINANCE" 
+              title="Transactions" 
+              subtitle="Everyday accounts, checking, and offset savings." 
+              buttonLabel="+ Add account"
+              onPressButton={() => { resetForm('Savings'); setModalVisible(true); }}
+            />
+
+            <DataTable 
+              sectionTitle="Transaction Accounts" 
+              itemCountText={`${transactionAccounts.length} accounts`} 
+              data={transactionAccounts} 
+              onEdit={startEdit} 
+              onDelete={handleDelete} 
+            />
+          </View>
         )}
+
         {activeTab === 'help' && <HelpScreen />}
         {activeTab === 'settings' && <SettingsScreen />}
-      </View>
-
-      {/* Bottom Navigation Tabs */}
-      <View style={styles.tabBar}>
-        {[
-          { key: 'overview', label: '📊 Overview' },
-          { key: 'loans', label: '💳 Loans' },
-          { key: 'transactions', label: '💰 Transactions' },
-          { key: 'help', label: '📖 Help' },
-          { key: 'settings', label: '⚙️ Settings' },
-        ].map((tab) => {
-          const isActive = activeTab === tab.key;
-          return (
-            <TouchableOpacity 
-              key={tab.key} 
-              style={[styles.tabItem, isActive && styles.tabItemActive]} 
-              onPress={() => setActiveTab(tab.key)}
-            >
-              <Text style={[styles.tabText, isActive && styles.tabTextActive]}>{tab.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
       </View>
 
       <ProfileModal 
@@ -250,17 +260,9 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  appContainer: { flex: 1, backgroundColor: '#f4f6f8', height: '100%', justifyContent: 'space-between' },
-  headerBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 24, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#e1e4e8' },
-  brandTitle: { fontSize: 20, fontWeight: 'bold', color: '#007AFF' },
-  userBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f4ff', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, gap: 8, borderWidth: 1, borderColor: '#d0e0ff' },
-  userBadgeText: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#007AFF', color: '#fff', textAlign: 'center', lineHeight: 24, fontWeight: 'bold', fontSize: 12 },
-  userEmailText: { fontSize: 13, fontWeight: '600', color: '#333' },
-  contentArea: { flex: 1 },
-  tabBar: { flexDirection: 'row', backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e1e4e8', paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'space-around' },
-  tabItem: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8 },
-  tabItemActive: { backgroundColor: '#f0f4ff' },
-  tabText: { fontSize: 13, fontWeight: '500', color: '#555' },
-  tabTextActive: { color: '#007AFF', fontWeight: 'bold' },
+  appContainer: { flex: 1, flexDirection: 'row', backgroundColor: '#f8f9fa', height: '100%' },
+  contentArea: { flex: 1, overflowY: 'auto' },
+  screenWrapper: { padding: 32 },
+  metricsRow: { flexDirection: 'row', gap: 16, marginBottom: 24, flexWrap: 'wrap' },
   center: { justifyContent: 'center', alignItems: 'center' },
 });

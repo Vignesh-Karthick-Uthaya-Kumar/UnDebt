@@ -1,8 +1,6 @@
-// components/common/MetricCard.tsx
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Colors } from '../../theme/colors';
-import { Typography } from '../../theme/typography';
 
 interface MetricCardProps {
   title: string;
@@ -14,8 +12,8 @@ interface MetricCardProps {
 export default function MetricCard({ title, value, subtitle, accentColor = Colors.textPrimary }: MetricCardProps) {
   return (
     <View style={styles.card}>
-      <Text style={Typography.metricLabel}>{title}</Text>
-      <Text style={[Typography.metricValue, { color: accentColor }]}>{value}</Text>
+      <Text style={styles.metricLabel}>{title}</Text>
+      <Text style={[styles.metricValue, { color: accentColor }]}>{value}</Text>
       <Text style={styles.subText}>{subtitle}</Text>
     </View>
   );
@@ -24,12 +22,14 @@ export default function MetricCard({ title, value, subtitle, accentColor = Color
 const styles = StyleSheet.create({
   card: {
     flex: 1,
-    backgroundColor: Colors.cardBackground,
+    backgroundColor: '#ffffff',
     padding: 20,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: '#e9ecef',
     minWidth: 220,
   },
-  subText: { fontSize: 12, color: Colors.textMuted, marginTop: 6 },
+  metricLabel: { fontSize: 13, color: '#6c757d', fontWeight: '500' },
+  metricValue: { fontSize: 26, fontWeight: 'bold', marginVertical: 4 },
+  subText: { fontSize: 12, color: '#adb5bd' },
 });

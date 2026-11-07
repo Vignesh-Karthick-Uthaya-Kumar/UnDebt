@@ -1,8 +1,5 @@
-// components/common/ScreenHeader.tsx
 import React from 'react';
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
-import { Colors } from '../../theme/colors';
-import { Typography } from '../../theme/typography';
 
 interface ScreenHeaderProps {
   category: string;
@@ -16,9 +13,9 @@ export default function ScreenHeader({ category, title, subtitle, buttonLabel, o
   return (
     <View style={styles.container}>
       <View>
-        <Text style={Typography.categoryLabel}>{category}</Text>
-        <Text style={Typography.screenTitle}>{title}</Text>
-        <Text style={Typography.screenSubtitle}>{subtitle}</Text>
+        <Text style={styles.categoryLabel}>{category}</Text>
+        <Text style={styles.screenTitle}>{title}</Text>
+        <Text style={styles.screenSubtitle}>{subtitle}</Text>
       </View>
       {buttonLabel && onPressButton && (
         <TouchableOpacity style={styles.button} onPress={onPressButton}>
@@ -31,6 +28,9 @@ export default function ScreenHeader({ category, title, subtitle, buttonLabel, o
 
 const styles = StyleSheet.create({
   container: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
-  button: { backgroundColor: Colors.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, flexDirection: 'row', alignItems: 'center' },
+  categoryLabel: { fontSize: 11, fontWeight: '700', color: '#5d55f7', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 },
+  screenTitle: { fontSize: 26, fontWeight: 'bold', color: '#1a1d20' },
+  screenSubtitle: { fontSize: 13, color: '#6c757d', marginTop: 2 },
+  button: { backgroundColor: '#5d55f7', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
   buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
 });
