@@ -11,7 +11,7 @@ export default function AuthScreen() {
 
   async function handleAuth() {
     if (!email || !password) {
-      alert('Please enter both email and password.');
+      alert('Enter your email and password.');
       return;
     }
     try {
@@ -19,13 +19,13 @@ export default function AuthScreen() {
       if (isSigningUp) {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        alert('Account created successfully!');
+        alert('Your account is ready.');
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       }
     } catch (err: any) {
-      alert('Auth Error: ' + err.message);
+      alert('Authentication failed: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -36,10 +36,10 @@ export default function AuthScreen() {
       <View style={styles.authCard}>
         <Text style={styles.authTitle}>Undebt Me</Text>
         <Text style={styles.authSub}>
-          {isSigningUp ? 'Create your account' : 'Sign in to your financial planner'}
+          {isSigningUp ? 'Create an account' : 'Sign in to your financial plan'}
         </Text>
 
-        <Text style={styles.label}>Email Address</Text>
+        <Text style={styles.label}>Email</Text>
         <TextInput
           style={styles.input}
           placeholder="you@example.com"
@@ -64,13 +64,13 @@ export default function AuthScreen() {
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.saveButtonText}>{isSigningUp ? 'Sign Up' : 'Sign In'}</Text>
+            <Text style={styles.saveButtonText}>{isSigningUp ? 'Create account' : 'Sign in'}</Text>
           )}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.switchAuthBtn} onPress={() => setIsSigningUp(!isSigningUp)}>
           <Text style={styles.switchAuthText}>
-            {isSigningUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+            {isSigningUp ? 'Already registered? Sign in' : 'New here? Create an account'}
           </Text>
         </TouchableOpacity>
       </View>

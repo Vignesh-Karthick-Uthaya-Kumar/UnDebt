@@ -7,29 +7,27 @@ interface ProfileModalProps {
   visible: boolean;
   userEmail?: string;
   onClose: () => void;
-  onSignOut: () => void;
 }
 
-export default function ProfileModal({ visible, userEmail, onClose, onSignOut }: ProfileModalProps) {
+export default function ProfileModal({ visible, userEmail, onClose }: ProfileModalProps) {
   async function handleSignOut() {
     await supabase.auth.signOut();
-    onSignOut();
   }
 
   return (
     <Modal visible={visible} animationType="fade" transparent={true}>
       <View style={styles.modalOverlay}>
         <View style={styles.profileModalContent}>
-          <Text style={styles.modalHeader}>Profile Management</Text>
-          <Text style={styles.label}>Signed in as:</Text>
+          <Text style={styles.modalHeader}>Your account</Text>
+          <Text style={styles.label}>Signed in as</Text>
           <Text style={styles.emailText}>{userEmail}</Text>
 
           <TouchableOpacity style={[styles.saveButton, { backgroundColor: '#dc3545', marginBottom: 10 }]} onPress={handleSignOut}>
-            <Text style={styles.saveButtonText}>Sign Out</Text>
+            <Text style={styles.saveButtonText}>Sign out</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.cancelModalButton} onPress={onClose}>
-            <Text style={styles.cancelModalButtonText}>Close</Text>
+            <Text style={styles.cancelModalButtonText}>Done</Text>
           </TouchableOpacity>
         </View>
       </View>

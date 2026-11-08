@@ -1,5 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import AccountTypeMark from './common/AccountTypeMark';
+import { formatAccountInterestRate } from '../lib/accountDisplay';
 
 interface DataTableProps {
   sectionTitle: string;
@@ -21,32 +23,27 @@ export default function DataTable({ sectionTitle, itemCountText, data, onEdit, o
 
       <View style={styles.tableHeadRow}>
         <Text style={[styles.th, { flex: 2.2 }]}>LOAN</Text>
-        <Text style={[styles.th, { flex: 1.5 }]}>OUTSTANDING</Text>
-        <Text style={[styles.th, { flex: 1 }]}>INTEREST</Text>
-        <Text style={[styles.th, { flex: 1.2 }]}>REPAYMENT</Text>
-        <Text style={[styles.th, { flex: 1.5 }]}>PROGRESS</Text>
+        <Text style={[styles.th, { flex: 1.5 }]}>BALANCE</Text>
+        <Text style={[styles.th, { flex: 1 }]}>RATE</Text>
+        <Text style={[styles.th, { flex: 1.2 }]}>PAYMENT</Text>
+        <Text style={[styles.th, { flex: 1.5 }]}>END DATE</Text>
         <Text style={[styles.th, { flex: 0.8, textAlign: 'right' }]}>ACTIONS</Text>
       </View>
 
       {data.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>No records found.</Text>
+          <Text style={styles.emptyText}>No loans yet.</Text>
         </View>
       ) : (
         data.map((item, index) => {
-          const balance = Number(item.balance || 0);
-          const originalAmt = balance * 1.2;
-          const paidPercent = Math.min(100, Math.max(5, Math.round(((originalAmt - balance) / originalAmt) * 100)));
+          const balance = Number(item.displayBalance ?? item.balance ?? 0);
 
           return (
             <View key={item.account_id || index} style={styles.tableRow}>
-              <View style={[styles.td, { flex: 2.2, flexDirection: 'row', alignItems: 'center', gap: 12 }]}>
-                <View style={styles.rowAvatar}>
-                  <Text style={styles.rowAvatarText}>{item.title?.[0]?.toUpperCase() || 'L'}</Text>
-                </View>
-                <View>
+              <View style={[styles.td, styles.loanCell]}>
+                <AccountTypeMark accountType={item.account_type || 'Loan'} />
+                <View style={styles.loanDetails}>
                   <Text style={styles.rowMainTitle}>{item.title}</Text>
-                  <Text style={styles.rowSubText}>Started {item.start_date || 'N/A'}</Text>
                 </View>
               </View>
 
@@ -55,7 +52,7 @@ export default function DataTable({ sectionTitle, itemCountText, data, onEdit, o
               </View>
 
               <View style={[styles.td, { flex: 1 }]}>
-                <Text style={styles.rowSecondaryValue}>{item.interest_rates?.[0]?.rate ? `${item.interest_rates[0].rate}%` : '—'}</Text>
+                <Text style={styles.rowSecondaryValue}>{formatAccountInterestRate(item)}</Text>
               </View>
 
               <View style={[styles.td, { flex: 1.2 }]}>
@@ -64,15 +61,12 @@ export default function DataTable({ sectionTitle, itemCountText, data, onEdit, o
               </View>
 
               <View style={[styles.td, { flex: 1.5 }]}>
-                <View style={styles.progressBarBg}>
-                  <View style={[styles.progressBarFill, { width: `${paidPercent}%` }]} />
-                </View>
-                <Text style={styles.progressText}>{paidPercent}%</Text>
+                <Text style={styles.rowSecondaryValue}>{item.end_date || '—'}</Text>
               </View>
 
               <View style={[styles.td, { flex: 0.8, flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }]}>
-                <TouchableOpacity onPress={() => onEdit(item)}><Text style={styles.actionEdit}>Edit</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => onDelete(item.account_id)}><Text style={styles.actionDelete}>Del</Text></TouchableOpacity>
+                <TouchableOpacity accessibilityLabel={`Edit ${item.title}`} onPress={() => onEdit(item)}><Text style={styles.actionEdit}>✎</Text></TouchableOpacity>
+                <TouchableOpacity accessibilityLabel={`Delete ${item.title}`} onPress={() => onDelete(item.account_id)}><Text style={styles.actionDelete}>×</Text></TouchableOpacity>
               </View>
             </View>
           );
@@ -91,17 +85,14 @@ const styles = StyleSheet.create({
   th: { fontSize: 11, fontWeight: '700', color: '#6c757d', letterSpacing: 0.5 },
   tableRow: { flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#f1f3f5', alignItems: 'center' },
   td: { justifyContent: 'center' },
-  rowAvatar: { width: 36, height: 36, borderRadius: 8, backgroundColor: '#f0f0ff', justifyContent: 'center', alignItems: 'center' },
-  rowAvatarText: { color: '#5d55f7', fontWeight: 'bold', fontSize: 14 },
+  loanCell: { flex: 2.2, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  loanDetails: { flexShrink: 1 },
   rowMainTitle: { fontSize: 14, fontWeight: 'bold', color: '#1a1d20' },
   rowSubText: { fontSize: 11, color: '#6c757d', marginTop: 2 },
   rowMainValue: { fontSize: 14, fontWeight: '600', color: '#1a1d20' },
   rowSecondaryValue: { fontSize: 14, fontWeight: '500', color: '#495057' },
-  progressBarBg: { height: 6, backgroundColor: '#f1f3f5', borderRadius: 3, width: '100%', marginBottom: 4, overflow: 'hidden' },
-  progressBarFill: { height: '100%', backgroundColor: '#5d55f7', borderRadius: 3 },
-  progressText: { fontSize: 11, color: '#6c757d' },
-  actionEdit: { fontSize: 12, fontWeight: '600', color: '#5d55f7' },
-  actionDelete: { fontSize: 12, fontWeight: '600', color: '#dc3545' },
+  actionEdit: { fontSize: 18, fontWeight: '600', color: '#5d55f7', paddingHorizontal: 4 },
+  actionDelete: { fontSize: 21, fontWeight: '500', color: '#dc3545', paddingHorizontal: 4 },
   emptyState: { padding: 40, alignItems: 'center' },
   emptyText: { color: '#6c757d', fontSize: 14 },
 });
