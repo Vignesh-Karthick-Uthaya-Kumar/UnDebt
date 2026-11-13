@@ -3,6 +3,7 @@ import { StyleSheet, View, ActivityIndicator, useWindowDimensions } from 'react-
 import { User } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 import { getAccountInterestRate } from './lib/accountDisplay';
+import { addCalendarDays, LoanScheduleDraft } from './lib/loanSchedules';
 import {
   ACCOUNT_TYPES,
   CREDIT_SPENDING_TYPES,
@@ -262,7 +263,7 @@ export default function App() {
     }
   }
 
-  async function handleSaveAccount() {
+  async function handleSaveAccount(scheduleDraft?: LoanScheduleDraft) {
     if (!balance.trim()) {
       alert('Please enter a balance.');
       return;
@@ -277,16 +278,108 @@ export default function App() {
         ? getPaymentEntries(existingAccount.payments)
         : [];
       const interestRate = interestRateVal ? Number((parseFloat(interestRateVal) + Number.EPSILON).toFixed(2)) : null;
-      const interest_rates = interestRate !== null ? [{ rate: interestRate, date: startDate, endDate: endDate || null }] : [];
-      const scheduledPayment = paymentAmount
-        ? [{ amount: parseFloat(paymentAmount), type: 'Principal and Interest', frequency: paymentFrequency, startDate, endDate: endDate || null }]
+      let interest_rates: { rate: number; date: string; endDate: string | null; periodKind?: string }[] = interestRate !== null
+        ? [{ rate: interestRate, date: startDate, endDate: endDate || null }]
         : [];
-      const payments = accountConfig?.fields.showPaymentDetails
-        ? [
-            ...existingPayments.filter((entry, index) => index > 0 && entry.type !== 'Principal and Interest'),
-            ...scheduledPayment,
-          ]
-        : existingPayments;
+      let payments = existingPayments;
+
+      if (accountConfig?.screen === 'loans' && scheduleDraft && interestRate !== null) {
+        const schedulePaymentTypes = new Set([
+          'Principal and Interest',
+          'Interest Only',
+          'Min balance',
+          'Full payment',
+        ]);
+        payments = existingPayments.filter(entry =>
+          !schedulePaymentTypes.has(entry.type || '') && entry.periodKind !== 'interest-only'
+        );
+
+        if (scheduleDraft.interestOnlyPeriodEnabled) {
+          payments.push({
+            type: 'Interest Only',
+            periodKind: 'interest-only',
+            frequency: scheduleDraft.repayments[0]?.frequency || 'Monthly',
+            startDate: scheduleDraft.interestOnlyStartDate,
+            endDate: scheduleDraft.interestOnlyEndDate,
+          });
+        }
+
+        payments.push(...scheduleDraft.repayments.map(repayment => ({
+          ...(repayment.amount ? { amount: Number(repayment.amount) } : {}),
+          type: accountType === 'CreditCard' ? scheduleDraft.creditCardPaymentType : repayment.type,
+          periodKind: 'repayment' as const,
+          frequency: repayment.frequency,
+          startDate: repayment.startDate,
+          endDate: repayment.endDate || null,
+          sameInterestRate: repayment.sameInterestRate,
+          ...(!repayment.sameInterestRate && repayment.interestRate
+            ? { interestRate: Number(repayment.interestRate) }
+            : {}),
+        })));
+
+        if (accountType === 'CreditCard') {
+          interest_rates = scheduleDraft.interestFreePeriodEnabled
+            ? [
+                ...(scheduleDraft.interestFreeStartDate > startDate
+                  ? [{
+                      rate: interestRate,
+                      date: startDate,
+                      endDate: addCalendarDays(scheduleDraft.interestFreeStartDate, -1),
+                    }]
+                  : []),
+                {
+                  rate: 0,
+                  date: scheduleDraft.interestFreeStartDate,
+                  endDate: scheduleDraft.interestFreeEndDate,
+                  periodKind: 'interest-free',
+                },
+                {
+                  rate: interestRate,
+                  date: addCalendarDays(scheduleDraft.interestFreeEndDate, 1),
+                  endDate: endDate || null,
+                },
+              ]
+            : [{ rate: interestRate, date: startDate, endDate: endDate || null }];
+        } else if (accountType === 'BuyNowPayLater') {
+          interest_rates = [{ rate: interestRate, date: startDate, endDate: endDate || null }];
+        } else {
+          interest_rates = [
+            ...(scheduleDraft.interestOnlyPeriodEnabled
+              ? [
+                  ...(scheduleDraft.interestOnlyStartDate > startDate
+                    ? [{
+                        rate: interestRate,
+                        date: startDate,
+                        endDate: addCalendarDays(scheduleDraft.interestOnlyStartDate, -1),
+                      }]
+                    : []),
+                  {
+                    rate: interestRate,
+                    date: scheduleDraft.interestOnlyStartDate,
+                    endDate: scheduleDraft.interestOnlyEndDate,
+                    periodKind: 'interest-only',
+                  },
+                ]
+              : []),
+            ...scheduleDraft.repayments.map(repayment => ({
+              rate: repayment.sameInterestRate || !repayment.interestRate
+                ? interestRate
+                : Number(repayment.interestRate),
+              date: repayment.startDate,
+              endDate: repayment.endDate || null,
+              periodKind: 'repayment',
+            })),
+          ];
+        }
+      } else if (accountConfig?.fields.showPaymentDetails) {
+        const scheduledPayment = paymentAmount
+          ? [{ amount: parseFloat(paymentAmount), type: 'Principal and Interest', frequency: paymentFrequency, startDate, endDate: endDate || null }]
+          : [];
+        payments = [
+          ...existingPayments.filter((entry, index) => index > 0 && entry.type !== 'Principal and Interest'),
+          ...scheduledPayment,
+        ];
+      }
 
       const payload = {
         user_id: user?.id,
@@ -562,7 +655,7 @@ export default function App() {
   }
 
   return (
-    <View style={[styles.appContainer, isCompact && styles.compactAppContainer]}>
+    <View style={styles.appContainer}>
       <Sidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
@@ -738,6 +831,7 @@ export default function App() {
         interestRateVal={interestRateVal} setInterestRateVal={setInterestRateVal}
         paymentAmount={paymentAmount} setPaymentAmount={setPaymentAmount}
         paymentFrequency={paymentFrequency} setPaymentFrequency={setPaymentFrequency}
+        initialAccount={editingId ? data.find(item => item.account_id === editingId) : undefined}
         onSave={handleSaveAccount}
         onClose={() => setModalVisible(false)}
       />
@@ -766,7 +860,6 @@ export default function App() {
 
 const styles = StyleSheet.create({
   appContainer: { flex: 1, flexDirection: 'row', backgroundColor: '#f8f9fa', height: '100%' },
-  compactAppContainer: { flexDirection: 'column' },
   contentArea: { flex: 1 },
   center: { justifyContent: 'center', alignItems: 'center' },
 });

@@ -1,0 +1,77 @@
+name: Publish design docs
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  validate-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Require design docs with code changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -eu
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            exit 0
+          fi
+          changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          if ! printf '%s\n' "$changed_files" | grep -q '^expoapp/'; then
+            exit 0
+          fi
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            required_files='docs/production.md
+          docs/production.html'
+          else
+            required_files='docs/dev.md
+          docs/dev.html'
+          fi
+
+          for required_file in $required_files; do
+            if ! printf '%s\n' "$changed_files" | grep -qx "$required_file"; then
+              echo "Application changes require updating $required_file."
+              exit 1
+            fi
+          done
+
+  publish:
+    needs: validate-docs
+    if: github.ref == 'refs/heads/dev' && github.event_name != 'pull_request'
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Upload static docs
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

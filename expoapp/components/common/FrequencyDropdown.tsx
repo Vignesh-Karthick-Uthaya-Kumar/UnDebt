@@ -15,9 +15,16 @@ interface FrequencyDropdownProps {
   value: string;
   onChange: (value: string) => void;
   optional?: boolean;
+  frequencies?: readonly string[];
 }
 
-export default function FrequencyDropdown({ label, value, onChange, optional = false }: FrequencyDropdownProps) {
+export default function FrequencyDropdown({
+  label,
+  value,
+  onChange,
+  optional = false,
+  frequencies = PAYMENT_FREQUENCIES,
+}: FrequencyDropdownProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -46,7 +53,7 @@ export default function FrequencyDropdown({ label, value, onChange, optional = f
               <Text style={styles.dropdownOptionText}>No repeat</Text>
             </TouchableOpacity>
           )}
-          {PAYMENT_FREQUENCIES.map(frequency => (
+          {frequencies.map(frequency => (
             <TouchableOpacity
               key={frequency}
               style={styles.dropdownOption}

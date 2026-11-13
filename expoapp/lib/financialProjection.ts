@@ -68,9 +68,12 @@ interface RateEntry {
 }
 
 interface PaymentEntry {
-  amount: number;
+  amount?: number;
   frequency: string;
+  type: string;
+  startDate: string;
   endDate?: string | null;
+  periodKind?: string;
 }
 
 interface PartPaymentEntry {
@@ -122,21 +125,52 @@ function getRates(account: FinancialAccount): RateEntry[] {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-function getPayments(account: FinancialAccount): PaymentEntry | null {
+function getPayments(account: FinancialAccount): PaymentEntry[] {
   const parsed = parseJson(account.payments);
-  const entry = Array.isArray(parsed) ? parsed[0] : parsed;
-  if (!entry || typeof entry !== 'object' || !('amount' in entry)) return null;
-  const payment = entry as Record<string, unknown>;
-  const amount = Number(payment.amount);
-  return Number.isFinite(amount) && amount > 0
-    ? {
-        amount,
+  const entries = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+  return entries
+    .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object')
+    .flatMap(payment => {
+      const type = typeof payment.type === 'string' ? payment.type : '';
+      if (![
+        'Principal and Interest',
+        'Interest Only',
+        'Min balance',
+        'Full payment',
+      ].includes(type)) return [];
+      const amount = Number(payment.amount);
+      const startDate = typeof payment.startDate === 'string'
+        ? payment.startDate
+        : typeof payment.date === 'string' ? payment.date : account.start_date || getTodayDate();
+      return [{
+        ...(Number.isFinite(amount) && amount > 0 ? { amount } : {}),
+        type,
         frequency: typeof payment.frequency === 'string' ? payment.frequency : 'Monthly',
+        startDate,
         endDate: typeof payment.endDate === 'string'
           ? payment.endDate
           : typeof payment.end_date === 'string' ? payment.end_date : null,
-      }
-    : null;
+        periodKind: typeof payment.periodKind === 'string' ? payment.periodKind : undefined,
+      }];
+    });
+}
+
+function getNextPayment(payments: PaymentEntry[], cursor: number, maturity: number) {
+  let nextPayment: { date: number; payment: PaymentEntry } | null = null;
+  for (const payment of payments) {
+    const start = toUtcDate(payment.startDate);
+    const end = payment.endDate ? toUtcDate(payment.endDate) : null;
+    if (start === null || (end !== null && end < cursor)) continue;
+    let date = addFrequency(start, payment.frequency);
+    let advances = 0;
+    while (date <= cursor && date <= maturity && advances < MAX_YEARS * 366) {
+      date = addFrequency(date, payment.frequency);
+      advances += 1;
+    }
+    if (date > maturity || (end !== null && date > end)) continue;
+    if (!nextPayment || date < nextPayment.date) nextPayment = { date, payment };
+  }
+  return nextPayment;
 }
 
 function isValidDate(value: string): boolean {
@@ -544,11 +578,8 @@ function simulateLoan(
 ): LoanSimulation {
   const startingBalance = Math.max(0, Number(account.balance) || 0);
   const rates = getRates(account);
-  const payment = getPayments(account);
-  const frequency = payment?.frequency || 'Monthly';
-  const periods = periodsPerYear(frequency);
+  const payments = getPayments(account);
   const maturity = Math.min(getLoanEndDate(account, today), stopDate);
-  const paymentEndDate = payment?.endDate ? toUtcDate(payment.endDate) : null;
   const points: BalancePoint[] = [{ date: today, balance: startingBalance }];
   const repaymentsByYear = Array(MAX_YEARS + 1).fill(0) as number[];
   const additionalPaymentsByYear = Array(MAX_YEARS + 1).fill(0) as number[];
@@ -561,17 +592,20 @@ function simulateLoan(
   let totalRepayments = 0;
   let totalAdditionalPayments = 0;
   let totalInterest = 0;
+  let accruedInterest = 0;
 
   while (cursor < maturity && balance > 0.005 && iterations < MAX_YEARS * 366) {
-    const scheduledNext = addFrequency(cursor, frequency);
-    const next = Math.min(scheduledNext, maturity);
+    const scheduledPayment = getNextPayment(payments, cursor, maturity);
+    const monthlyBoundary = addMonths(cursor, 1);
+    const scheduledNext = Math.min(monthlyBoundary, maturity);
+    const next = Math.min(scheduledNext, scheduledPayment?.date ?? maturity, maturity);
     if (next <= cursor) break;
     const offsetBalance = includeOffsets
       ? offsetForLoan(account, loans, transactions, transactionFlowEvents, next, today)
       : 0;
     const rate = rates.length
-      ? loanPeriodRate(rates, cursor, next, scheduledNext, periods)
-      : (getAccountInterestRate(account) ?? 0) / 100 / periods
+      ? loanPeriodRate(rates, cursor, next, scheduledNext, 12)
+      : (getAccountInterestRate(account) ?? 0) / 100 / 12
         * (next - cursor) / (scheduledNext - cursor);
     const chargeEvents = getLoanChargeEvents(account, cursor, next);
     const chargeAmount = chargeEvents.reduce((total, event) => total + event.amount, 0);
@@ -581,11 +615,19 @@ function simulateLoan(
     );
     const interest = Math.max(0, balance - offsetBalance) * rate + chargeInterest;
     totalInterest += interest;
+    accruedInterest += interest;
     balance += chargeAmount + interest;
-    if (payment && scheduledNext <= maturity && (paymentEndDate === null || scheduledNext <= paymentEndDate)) {
-      const paid = Math.min(balance, payment.amount);
+    if (scheduledPayment?.date === next) {
+      const payment = scheduledPayment.payment;
+      const amount = payment.type === 'Full payment'
+        ? balance
+        : payment.type === 'Interest Only' && payment.amount === undefined
+          ? accruedInterest
+          : payment.amount || 0;
+      const paid = Math.min(balance, amount);
       balance -= paid;
       totalRepayments += paid;
+      accruedInterest = Math.max(0, accruedInterest - paid);
     }
     const additionalPayments = includeOffsets
       ? partPayments
@@ -671,7 +713,7 @@ function yearsBetween(start: number, end: number): number {
 }
 
 function annualRepayment(payment: PaymentEntry): number {
-  return payment.amount * periodsPerYear(payment.frequency);
+  return (payment.amount || 0) * periodsPerYear(payment.frequency);
 }
 
 export function getProjectedLoanBalancesAtDate(
@@ -871,8 +913,8 @@ export function projectFinancials(
     },
   ];
   const scheduledMonthlyRepayments = loans.reduce((sum, account) => {
-    const payment = getPayments(account);
-    return payment ? sum + annualRepayment(payment) / 12 : sum;
+    return sum + getPayments(account)
+      .reduce((paymentTotal, payment) => paymentTotal + annualRepayment(payment), 0) / 12;
   }, 0);
   const additionalMonthlyRepayments = upcomingPartPaymentTotal / 12;
   const monthlyRepayments = scheduledMonthlyRepayments + additionalMonthlyRepayments;

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="UnDebt production and proposed design documentation.">
+    <title>UnDebt Design Docs</title>
+    <style>
+      :root { color-scheme: light; --ink: #172033; --muted: #596579; --brand: #5146e5; --line: #dce2ee; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #f5f7fb; color: var(--ink); font: 16px/1.6 system-ui, sans-serif; }
+      main { max-width: 860px; margin: 8vh auto; padding: 2rem; }
+      h1 { margin: 0 0 .4rem; font-size: clamp(2rem, 5vw, 3rem); }
+      p { color: var(--muted); }
+      section { margin: 1.5rem 0; padding: 1.4rem; background: white; border: 1px solid var(--line); border-radius: 14px; }
+      a { color: var(--brand); font-weight: 650; }
+      footer { color: var(--muted); font-size: .9rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>UnDebt Design Docs</h1>
+      <p>Production describes the current <code>main</code> baseline. Proposed describes the current <code>dev</code> design and must not be treated as released behavior.</p>
+      <section>
+        <h2>Production — as-is</h2>
+        <p>Architecture, persisted schema, current UI, data flow, calculations, known limitations, and release policy.</p>
+        <p><a href="./production.html">Read production design (HTML)</a> · <a href="./production.md">Markdown source</a></p>
+      </section>
+      <section>
+        <h2>Proposed — dev</h2>
+        <p>Current staged loan-schedule proposal, JSON payloads, validation, projection changes, remaining gaps, and merge path.</p>
+        <p><a href="./dev.html">Read proposed design (HTML)</a> · <a href="./dev.md">Markdown source</a></p>
+      </section>
+      <footer>Static documentation only. This site does not host the Expo application or deploy Supabase changes.</footer>
+    </main>
+  </body>
+</html>

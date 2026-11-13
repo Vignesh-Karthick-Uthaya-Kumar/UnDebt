@@ -11,6 +11,9 @@ export interface PaymentEntry {
   endDate?: string | null;
   linkedAccountId?: string;
   linked_account_id?: string;
+  periodKind?: 'interest-only' | 'interest-free' | 'repayment';
+  sameInterestRate?: boolean;
+  interestRate?: number | string;
 }
 
 export interface NewPaymentEntry extends PaymentEntry {
