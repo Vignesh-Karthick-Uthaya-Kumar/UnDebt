@@ -3,80 +3,246 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="UnDebt architecture and behavior as committed on main.">
-    <title>UnDebt — Production Design</title>
+    <meta name="description" content="UnDebt production architecture, database, calculations, and release design.">
+    <title>UnDebt — Production Technical Design</title>
     <style>
-      :root { color-scheme: light; --ink: #172033; --muted: #596579; --brand: #5146e5; --line: #dce2ee; }
+      :root { color-scheme: light; --ink: #172033; --muted: #596579; --brand: #5146e5; --line: #dce2ee; --panel: #fff; }
       * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
       body { margin: 0; background: #f5f7fb; color: var(--ink); font: 16px/1.65 system-ui, sans-serif; }
-      main { max-width: 980px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
-      h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.15; }
-      h2 { margin-top: 2rem; border-bottom: 1px solid var(--line); padding-bottom: .35rem; }
+      main { max-width: 1120px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+      h1 { font-size: clamp(2rem, 5vw, 3.2rem); line-height: 1.1; margin-bottom: .4rem; }
+      h2 { margin-top: 2.4rem; border-bottom: 1px solid var(--line); padding-bottom: .4rem; }
+      h3 { margin-top: 1.6rem; }
       a { color: var(--brand); }
+      nav { display: flex; flex-wrap: wrap; gap: .55rem 1rem; padding: .8rem 1rem; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+      nav a { text-decoration: none; font-size: .9rem; }
       .status { padding: .8rem 1rem; background: #e9eaff; border-radius: 10px; }
-      .card { overflow-x: auto; padding: 1rem; background: white; border: 1px solid var(--line); border-radius: 12px; }
-      table { width: 100%; border-collapse: collapse; min-width: 620px; }
-      th, td { padding: .6rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      .card, details { padding: 1rem; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+      .diagram { overflow-x: auto; margin: 1rem 0; padding: .7rem; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+      svg { display: block; min-width: 720px; width: 100%; height: auto; }
+      svg text { fill: var(--ink); font: 15px system-ui, sans-serif; }
+      svg .small { fill: var(--muted); font-size: 12px; }
+      svg .box { fill: #f8f9ff; stroke: #8d87f4; stroke-width: 2; rx: 12; }
+      svg .db { fill: #eaf7ee; stroke: #3a9d5d; stroke-width: 2; }
+      svg .edge { stroke: #596579; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+      table { width: 100%; border-collapse: collapse; min-width: 660px; }
+      th, td { padding: .65rem .8rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      th { background: #f8f9ff; }
+      pre { overflow-x: auto; padding: 1rem; background: #172033; color: #eef0ff; border-radius: 10px; font-size: .9rem; }
       code { overflow-wrap: anywhere; }
+      .note { border-left: 4px solid #e8a52a; padding: .75rem 1rem; background: #fff8e9; }
+      footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+      @media print { body { background: white; } nav { display: none; } main { max-width: none; } .diagram, .card, details { break-inside: avoid; } }
     </style>
   </head>
   <body>
     <main>
-      <p><a href="./index.html">← Design docs</a> · <a href="./production.md">Markdown</a></p>
-      <h1>UnDebt — Production design</h1>
-      <p class="status"><strong>Status:</strong> As-is baseline from <code>main</code> (production), not a target-state specification.</p>
+      <p><a href="./index.html">← Design docs</a> · <a href="./production.md">Markdown source</a> · <a href="./dev.html">Proposed dev design</a></p>
+      <h1>UnDebt — Production technical design</h1>
+      <p class="status"><strong>Branch:</strong> <code>main</code> · <strong>Baseline:</strong> <code>60512dc</code> · As implemented on production; not a target-state design.</p>
+      <p>For technical architects, designers, and developers. Proposed changes are documented separately and are not production until merged.</p>
+      <nav aria-label="Document contents">
+        <a href="#overview">Architecture</a><a href="#product">UI</a><a href="#schema">Database</a>
+        <a href="#setup">Setup and SQL</a><a href="#calculations">Calculations</a><a href="#gaps">Gaps</a><a href="#release">Release</a>
+      </nav>
 
-      <h2>Architecture</h2>
-      <ul>
-        <li><strong>Client:</strong> Expo, React Native, TypeScript, and React Native Web. <code>expoapp/App.tsx</code> owns authentication state, account data, navigation, and calculations; screens/components render the UI.</li>
-        <li><strong>Backend:</strong> Supabase Auth and Postgres. The Supabase JS client uses a project URL and public client key from <code>expoapp/config.ts</code>. Authenticated clients read/write <code>public.accounts</code>; Postgres RLS scopes rows to the signed-in user.</li>
-        <li><strong>Flow:</strong> Sign up/sign in → fetch account rows → calculate summaries/forecasts locally → persist account or JSON data → refetch. There is no separate API server or server-side projection engine.</li>
-        <li>Expo supports native and web development. GitHub Pages hosts static documentation only, not the financial app.</li>
-      </ul>
+      <h2 id="overview">1. System overview</h2>
+      <p>UnDebt is a client-rendered household finance planner. Expo/React Native screens collect account and cash-flow assumptions. TypeScript domain modules calculate balances, summaries, and forecasts in the device/browser. Supabase provides email/password authentication, Postgres persistence, and row-level access control through its Data API. There is no application API server, scheduled backend worker, bank aggregator, or server-side projection engine.</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 980 330" role="img" aria-labelledby="arch-title arch-desc">
+          <title id="arch-title">UnDebt production architecture</title><desc id="arch-desc">User interface and App state call Supabase Auth and PostgREST; Postgres RLS protects account rows. Domain calculations run locally and return data to the UI.</desc>
+          <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#596579"/></marker></defs>
+          <rect class="box" x="20" y="115" width="145" height="72"/><text x="44" y="145">User + UI</text><text class="small" x="38" y="168">Expo / React Native</text>
+          <rect class="box" x="210" y="115" width="175" height="72"/><text x="238" y="145">App.tsx</text><text class="small" x="228" y="168">state + orchestration</text>
+          <rect class="box" x="435" y="32" width="175" height="72"/><text x="467" y="62">Supabase Auth</text><text class="small" x="460" y="85">email / password</text>
+          <rect class="box" x="435" y="198" width="175" height="72"/><text x="466" y="228">Supabase JS</text><text class="small" x="456" y="251">PostgREST / Data API</text>
+          <rect class="box" x="670" y="198" width="125" height="72"/><text x="699" y="228">RLS</text><text class="small" x="685" y="251">auth.uid() scope</text>
+          <ellipse class="db" cx="895" cy="234" rx="72" ry="43"/><text x="849" y="230">Postgres</text><text class="small" x="853" y="250">accounts</text>
+          <rect class="box" x="210" y="15" width="175" height="62"/><text x="229" y="42">Domain modules</text><text class="small" x="221" y="62">projections / activity</text>
+          <path class="edge" d="M165 151 H205"/><path class="edge" d="M385 138 C410 120 415 72 430 68"/><path class="edge" d="M385 165 C410 183 415 225 430 233"/><path class="edge" d="M610 234 H665"/><path class="edge" d="M795 234 H818"/><path class="edge" d="M290 110 V82"/><path class="edge" d="M210 50 C160 70 160 110 175 130"/>
+        </svg>
+      </figure>
 
-      <h2>UI and features</h2>
-      <p>Overview, Loans, Accounts, Loan management (offsets), Save, Spend, Help &amp; guides, and Settings. Users manage accounts, loans, income, savings transfers, bills, expenses, and offsets; view balances, interest, net worth, charts, and projections; select series and periods; and use email/password authentication. Layout adapts to available width.</p>
-      <p>Types: HomeLoan, CreditCard, PersonalLoan, BuyNowPayLater, CarLoan, Savings, Checking, Investment, and TransactionAccount.</p>
-
-      <h2>Database model</h2>
-      <div class="card">
+      <div class="table-wrap">
         <table>
-          <thead><tr><th>Table/column</th><th>Persisted definition</th></tr></thead>
+          <thead><tr><th>Layer</th><th>Responsibility</th><th>Modules</th></tr></thead>
           <tbody>
-            <tr><td><code>accounts.account_id</code></td><td>Generated UUID primary key</td></tr>
-            <tr><td><code>user_id</code></td><td>UUID defaulting to <code>auth.uid()</code>; FK to <code>auth.users(id)</code></td></tr>
-            <tr><td><code>account_type</code></td><td>Required enum with the nine account types above</td></tr>
-            <tr><td><code>title</code>, <code>balance</code></td><td>Nullable varchar(255); required numeric(15,2)</td></tr>
-            <tr><td><code>start_date</code>, <code>end_date</code></td><td>Required date defaulting to current date; nullable date</td></tr>
-            <tr><td><code>offset_config</code></td><td>JSONB default with offset type, percentage, and linked account IDs</td></tr>
-            <tr><td><code>payments</code>, <code>interest_rates</code></td><td>JSONB arrays for activities/schedules and dated rates</td></tr>
-            <tr><td><code>created_at</code>, <code>updated_at</code></td><td>Time-zone timestamps; update triggers maintain <code>updated_at</code></td></tr>
+            <tr><td>Presentation</td><td>Navigation, forms, charts, responsive layout</td><td><code>App.tsx</code>, <code>screens/</code>, <code>components/</code>, <code>theme/</code></td></tr>
+            <tr><td>Orchestration</td><td>Auth session, tab state, account collection, modal actions, reads/writes</td><td><code>App.tsx</code>, <code>lib/supabase.ts</code></td></tr>
+            <tr><td>Domain</td><td>Recurrence, balances, projections, offset linking, display rates</td><td><code>paymentEntries.ts</code>, <code>financialProjection.ts</code>, <code>offsetAccounts.ts</code>, <code>accountDisplay.ts</code></td></tr>
+            <tr><td>Platform</td><td>Identity, Postgres, PostgREST, RLS</td><td>Supabase hosted/local project</td></tr>
           </tbody>
         </table>
       </div>
-      <p>Indexes cover account type, user ID, and GIN-indexed payment/rate JSON. No transaction, repayment, profile, or audit-history table exists. Application JSON shapes are not enforced by a database JSON schema.</p>
-      <p><code>payments[]</code> stores objects such as <code>{type, amount?, startDate, frequency?, endDate?, linkedAccountId?}</code>, including Income, Payment, Part Payment, Bill Payment, and Expense. <code>interest_rates[]</code> uses <code>{rate, date, endDate?}</code>; <code>offset_config</code> uses <code>offset_type</code>, optional <code>percentage</code>, and <code>linked_accounts</code>.</p>
-
-      <h2>Calculations and data interactions</h2>
-      <ul>
-        <li>Balances as of a date apply eligible payment occurrences since the later of the saved account baseline and entry start date. Income increases balances; payments/expenses adjust balances by entry and account type; linked transfers can update both sides.</li>
-        <li>Recurrence supports daily, weekly, fortnightly, monthly, quarterly, half-yearly, and yearly patterns. Month-based occurrences clamp to the last valid calendar day.</li>
-        <li>Loan projections simulate periodic interest and scheduled repayments with dated rates, charges, additional payments, and linked offsets; the horizon is capped at 30 years. Offset interest is estimated using loan balance less eligible offset funds, bounded by the balance.</li>
-        <li>Net worth = assets − debt. Save/Spend totals cover one-to-twelve-month or financial-year periods. July–June is the default financial year; Settings can change its start month.</li>
-      </ul>
-      <p><strong>Assumption:</strong> These are planning estimates, not lender statements or financial advice. Rates, compounding, payment timing, fees, and rounding may differ from institutions.</p>
-
-      <h2>Gaps and risks</h2>
+      <p><strong>Runtime versions:</strong> Expo <code>~58.0.23</code>, React <code>19.3.0</code>, React Native <code>0.88.1</code>, TypeScript <code>~6.0.3</code>, Supabase JS <code>^2.119.0</code>, React Native Web <code>^0.21.4</code>. <code>expo-sqlite</code> is installed but not used in the active app data path.</p>
       <ol>
-        <li>JSONB arrays allow inconsistent payloads and complicate constraints, reporting, history, and concurrent edits.</li>
-        <li>Calculations are client-side; there is no shared server contract or saved calculation snapshot.</li>
-        <li>No bank-feed/import, currency conversion, transaction ledger, export/backup, or automated regression suite is present.</li>
-        <li>The migration has overlapping RLS policies and multiple account update triggers. Verify deployed policies and trigger behavior before modifying schema/permissions.</li>
-        <li>Projection assumptions/defaults are code constants; assumptions and estimate warnings need explicit product treatment.</li>
+        <li><code>getSession()</code> initializes the user; <code>onAuthStateChange()</code> tracks session changes.</li>
+        <li>Signed-in users trigger <code>select('*').order('created_at', descending)</code>; RLS scopes rows.</li>
+        <li><code>App.tsx</code> holds rows in React state and derives account subsets and memoized summaries locally.</li>
+        <li>Account/activity/offset writes update a row, then the app refetches. Projection results are not persisted.</li>
+        <li>A new linked transfer is stored once and mirrored in calculations. Moving an existing activity between accounts uses two independent writes with best-effort rollback, not a transaction.</li>
       </ol>
 
-      <h2>Deployment and merge policy</h2>
-      <p><code>main</code> is production; <code>dev</code> is proposed. Update both dev design files for material code behavior changes or explicit design refreshes. In a reviewed <code>dev → main</code> PR, update <code>production.md</code> and <code>production.html</code> to describe the exact release; the workflow enforces this for application-code changes. Assess calculations and migration/RLS; run <code>cd expoapp &amp;&amp; npx tsc --noEmit</code> plus platform checks. Merge only after approval/validation; the merge makes the production docs current with code. GitHub Actions publishes static <code>docs/</code> on dev pushes after Pages is configured to use GitHub Actions. App hosting and Supabase migration deployment are separate release steps.</p>
+      <h2 id="product">2. UI and product surface</h2>
+      <div class="table-wrap">
+        <table><thead><tr><th>Screen</th><th>Current capability</th></tr></thead><tbody>
+          <tr><td>Overview</td><td>Debt, assets, net worth, combined forecast</td></tr>
+          <tr><td>Loans</td><td>CRUD, loan table, scheduled/actual forecast series, interest and repayment metrics</td></tr>
+          <tr><td>Accounts</td><td>Savings/checking/investment/transaction accounts, interest display and forecast</td></tr>
+          <tr><td>Loan management</td><td>Link cash to loans; full/partial/capped offsets; additional payments and estimated savings</td></tr>
+          <tr><td>Save / Spend</td><td>Income, transfers, bills, expenses, period summaries and comparison charts</td></tr>
+          <tr><td>Help / Settings / Profile</td><td>Help, financial-year month, currency text field, auth profile actions</td></tr>
+        </tbody></table>
+      </div>
+      <p>Types: <code>HomeLoan</code>, <code>CreditCard</code>, <code>PersonalLoan</code>, <code>BuyNowPayLater</code>, <code>CarLoan</code>, <code>Savings</code>, <code>Checking</code>, <code>Investment</code>, and <code>TransactionAccount</code>. First five are loans. Currency output is `$`/AUD-oriented; the currency input is not a conversion engine. Financial year defaults to July (month index 6).</p>
+
+      <h2 id="schema">3. Persistence model and schema</h2>
+      <figure class="diagram">
+        <svg viewBox="0 0 820 240" role="img" aria-labelledby="er-title er-desc">
+          <title id="er-title">Production entity relationship</title><desc id="er-desc">One auth user owns zero or more accounts. Account record stores balance, type, dates, and three JSONB documents.</desc>
+          <defs><marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#596579"/></marker></defs>
+          <rect class="box" x="35" y="75" width="205" height="88"/><text x="95" y="108">auth.users</text><text class="small" x="84" y="134">id (UUID PK)</text>
+          <rect class="db" x="405" y="35" width="355" height="175" rx="12"/><text x="520" y="67">public.accounts</text>
+          <text class="small" x="430" y="97">account_id PK · user_id FK · account_type</text><text class="small" x="430" y="121">title · balance · start_date · end_date</text>
+          <text class="small" x="430" y="145">offset_config JSONB · payments JSONB</text><text class="small" x="430" y="169">interest_rates JSONB · timestamps</text>
+          <path d="M245 119 H395" stroke="#596579" stroke-width="2" marker-end="url(#arrow2)"/><text class="small" x="278" y="105">1 : 0..N</text>
+        </svg>
+      </figure>
+      <p>Authoritative migration: <code>expoapp/supabase/migrations/20261108135811_remote_schema.sql</code>. It creates one application table, not normalized activity/repayment/profile tables.</p>
+      <div class="table-wrap"><table><thead><tr><th>Column</th><th>Type/behavior</th></tr></thead><tbody>
+        <tr><td><code>account_id</code></td><td>UUID PK; <code>gen_random_uuid()</code></td></tr>
+        <tr><td><code>user_id</code></td><td>UUID default <code>auth.uid()</code>; FK to <code>auth.users(id)</code></td></tr>
+        <tr><td><code>account_type</code></td><td>Required enum with nine account types</td></tr>
+        <tr><td><code>title</code>, <code>balance</code></td><td>Nullable <code>varchar(255)</code>; required <code>numeric(15,2)</code>, no DB default</td></tr>
+        <tr><td><code>start_date</code>, <code>end_date</code></td><td>Required date default current date; nullable date</td></tr>
+        <tr><td><code>offset_config</code></td><td>Nullable JSONB, default offset type / percentage / linked IDs object</td></tr>
+        <tr><td><code>payments</code>, <code>interest_rates</code></td><td>Nullable JSONB arrays, default <code>[]</code></td></tr>
+        <tr><td><code>created_at</code>, <code>updated_at</code></td><td>Required <code>timestamptz</code>, default <code>now()</code></td></tr>
+      </tbody></table></div>
+      <p>Enums: <code>account_type</code> has the nine app types. Migration’s <code>offset_type</code> enum contains <code>Full Offset</code>, <code>Reduced Interest Rate</code>, <code>Capped Percentage Balance</code>, <code>No Offset</code>; JSONB does not use this enum. Indexes are B-tree on account type/user ID and GIN on payments/rates.</p>
+      <details><summary>Core schema DDL excerpt</summary>
+        <p>The checked-in migration additionally defines RLS policies, grants, update triggers, and a public-table RLS event trigger.</p>
+        <pre><code>create type public.account_type as enum (
+  'HomeLoan', 'CreditCard', 'PersonalLoan', 'BuyNowPayLater', 'CarLoan',
+  'Savings', 'Checking', 'Investment', 'TransactionAccount'
+);
+create type public.offset_type as enum (
+  'Full Offset', 'Reduced Interest Rate', 'Capped Percentage Balance', 'No Offset'
+);
+create table public.accounts (
+  account_id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid() references auth.users(id),
+  account_type public.account_type not null,
+  title varchar(255),
+  balance numeric(15,2) not null,
+  start_date date not null default current_date,
+  end_date date,
+  offset_config jsonb default
+    '{"percentage": null, "offset_type": "No Offset", "linked_accounts": []}'::jsonb,
+  payments jsonb default '[]'::jsonb,
+  interest_rates jsonb default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.accounts enable row level security;</code></pre>
+      </details>
+      <p><code>payments[]</code> stores activities such as <code>{type, amount?, startDate?, frequency?, endDate?, linkedAccountId?}</code>: Income, Payment, Part Payment, Bill Payment, Expense. Production loan schedule is one Principal and Interest payment. <code>interest_rates[]</code> stores <code>{rate, date, endDate?}</code>. <code>offset_config</code> stores type, percentage, linked loan IDs, and compatibility flags. JSON shape and inter-account IDs have no DB constraints.</p>
+      <p class="note"><strong>Access/trigger caveats:</strong> RLS is enabled. The migration defines a PUBLIC ownership <code>FOR ALL</code> policy plus four overlapping authenticated CRUD policies. It grants CRUD to anon/authenticated, so RLS is the ownership boundary. Two update triggers both set <code>updated_at</code>. The public-table RLS event trigger logs errors rather than aborting DDL. Review deployed catalog state before relying on or changing these.</p>
+
+      <h2 id="setup">4. Database setup and SQL</h2>
+      <p>Local CLI config: Postgres 17, migrations enabled, seeds disabled, API schemas <code>public</code> and <code>graphql_public</code>. Local Supabase requires Docker.</p>
+      <pre><code>cd expoapp
+npm ci
+npx supabase start
+npx supabase db reset       # local only: replay migrations
+npx supabase status
+npx expo start --web</code></pre>
+      <p>Remote migration operations require auth and explicit project linking. Inspect status and target before the write:</p>
+      <pre><code>npx supabase login
+npx supabase link --project-ref &lt;project-ref&gt;
+npx supabase migration list
+npx supabase db push        # applies pending migrations to linked remote</code></pre>
+      <p>Never run remote <code>db push</code> without checking project, migration list, backup/rollback, and review. GitHub Pages does not apply schema changes. The migration file is the source of truth.</p>
+      <p><code>SUPABASE_CONFIG</code> in <code>expoapp/config.ts</code> currently contains the hosted project URL and client publishable key; local CLI credentials and dev/prod environment selection are not wired. For local Supabase, use the API URL and anon/publishable key from <code>npx supabase status</code> in a local-only config. The publishable key is not the authorization boundary; never ship <code>service_role</code> in a client.</p>
+      <details><summary>SQL equivalents for authenticated app operations</summary>
+        <p>Run through an authenticated JWT with <code>auth.uid()</code> set. Administrative SQL sessions may bypass RLS. These statements illustrate current access patterns; the app uses Supabase JS/PostgREST.</p>
+        <pre><code>select *
+from public.accounts
+where user_id = auth.uid()
+order by created_at desc;
+
+insert into public.accounts
+  (user_id, account_type, title, balance, start_date, end_date, payments, interest_rates)
+values
+  (auth.uid(), $1::public.account_type, $2, $3::numeric(15,2),
+   $4::date, $5::date, $6::jsonb, $7::jsonb);
+
+update public.accounts
+set payments = $2::jsonb
+where account_id = $1::uuid and user_id = auth.uid();
+
+delete from public.accounts
+where account_id = $1::uuid and user_id = auth.uid();</code></pre>
+      </details>
+      <details><summary>Inspect deployed columns, policies, and triggers</summary>
+        <pre><code>select column_name, data_type, is_nullable, column_default
+from information_schema.columns
+where table_schema = 'public' and table_name = 'accounts'
+order by ordinal_position;
+
+select policyname, roles, cmd, qual, with_check
+from pg_policies
+where schemaname = 'public' and tablename = 'accounts';
+
+select tgname, pg_get_triggerdef(oid)
+from pg_trigger
+where tgrelid = 'public.accounts'::regclass and not tgisinternal;</code></pre>
+      </details>
+
+      <h2 id="calculations">5. Calculation behavior</h2>
+      <p>All projections are client-side estimates; they are not lender quotes, reconciled transaction history, or financial advice.</p>
+      <h3>Activity and balance reconstruction</h3>
+      <ul>
+        <li>Dates are ISO <code>YYYY-MM-DD</code>; no frequency means one-off. Recurrence supports days, weeks, fortnights, months, quarters, half-years, and years. Day intervals use fixed day counts; month intervals preserve the start day and clamp to month-end.</li>
+        <li>As-of balance = stored balance plus/minus eligible activities from <code>max(start_date || created_at-date, activity-start-date)</code>. Income adds; outflow sign depends on account/type. Linked Payment/Part Payment mirrors configured flows between accounts.</li>
+        <li>Invalid dates in public summary/projection requests throw. Some malformed JSON parsers return no entries and fall back to defaults.</li>
+      </ul>
+      <h3>Loan interest and cash projections</h3>
+      <pre><code>periodRate = Σ (annualRateSegment / 100 / periodsPerYear)
+                 × (segmentDuration / scheduledPeriodDuration)
+interest = max(0, loanBalance - eligibleOffsetBalance) × periodRate
+            + proratedChargeInterest</code></pre>
+      <p>The production loan simulator uses one saved scheduled repayment per loan at its configured frequency. It adds interest/charges, applies the scheduled amount, then linked additional payments. Rate changes are duration-prorated inside that interval; this is not daily compounding.</p>
+      <p>Cash/account interest uses annual windows, prorated by rate segments and applied only to positive balances. Linked offset funds do not separately earn account interest in forecasts. Offset allocation is proportional to linked loan balances and bounded by each loan balance. The horizon is at most 30 years; charts sample annual balances. Default projection horizon follows the final non-credit loan payoff when present, otherwise 30 years.</p>
+      <h3>Summary metrics and hard-coded defaults</h3>
+      <ul>
+        <li>Net worth = assets − debt. Scheduled monthly payment summary = payment amount × periods per year ÷ 12.</li>
+        <li>Interest saved = scheduled/no-offset interest − offset/actual interest, floored at zero.</li>
+        <li>Save/Spend periods are one–twelve months or financial year; July is the default year start. Spend available = starting cash + projected income; after-spend = available − bills/expenses.</li>
+        <li>Example-coded defaults: base 4.85%; home +2.10%, car +2.05%, personal +3.65%, card +15.55%, BNPL −4.85%; savings/checking subtract 2.50%. These are static constants, not a live benchmark feed.</li>
+      </ul>
+
+      <h2 id="gaps">6. Gaps and technical risks</h2>
+      <ul>
+        <li>JSONB arrays have no schema constraints, event history, relational links, conflict detection, or safe concurrent merge.</li>
+        <li>No bank integration, multi-currency conversion, budget engine, export/restore, offline sync, automated test suite, or full CI app build is present.</li>
+        <li>Currency/financial-year settings are client state, not a durable preferences model. There is no stage-specific Supabase configuration; <code>config.ts</code> points to one hosted project. Cross-account transfer edits are not atomic.</li>
+        <li>JSON offset labels drift from the unused DB enum (<code>Partial Offset</code> vs <code>Reduced Interest Rate</code>; <code>Capped Offset</code> vs <code>Capped Percentage Balance</code>).</li>
+        <li>Offset labels drift from the unused DB enum. Rate selection uses start dates; stored <code>endDate</code> values do not independently deactivate rates. Redundant RLS policies/triggers, timezone boundaries, malformed legacy JSON, and financial assumptions need tests and reviewed migrations.</li>
+      </ul>
+
+      <h2 id="release">7. Deployment, branch, and merge policy</h2>
+      <ol>
+        <li><code>main</code> is production; <code>dev</code> is proposed/integration. Production docs describe the exact production commit, not future work.</li>
+        <li>For every material app behavior change on <code>dev</code>, update <code>docs/dev.md</code> and <code>docs/dev.html</code>. The workflow verifies both are included.</li>
+        <li>Open reviewed <code>dev → main</code> PR; update production MD/HTML to match the release in that PR. Workflow verifies both files when app code changes.</li>
+        <li>Review UI/accessibility, financial test cases, data compatibility, RLS/migration plan, and docs. Run <code>cd expoapp &amp;&amp; npx tsc --noEmit</code> and available app/platform checks. Merge after approval; merged docs become the new production record.</li>
+        <li>GitHub Pages serves static design pages from branch <code>dev</code>, path <code>/docs</code>, at <a href="https://vignesh-karthick-uthaya-kumar.github.io/UnDebt/">the docs site</a>. The Actions workflow also validates documentation and publishes on dev pushes. It does not host Expo or apply Supabase migrations. App distribution and database migration apply are separate release steps.</li>
+      </ol>
+      <p><strong>Code references:</strong> <a href="https://github.com/Vignesh-Karthick-Uthaya-Kumar/UnDebt/blob/main/expoapp/App.tsx">App.tsx</a> · <a href="https://github.com/Vignesh-Karthick-Uthaya-Kumar/UnDebt/blob/main/expoapp/lib/financialProjection.ts">financialProjection.ts</a> · <a href="https://github.com/Vignesh-Karthick-Uthaya-Kumar/UnDebt/blob/main/expoapp/lib/paymentEntries.ts">paymentEntries.ts</a> · <a href="https://github.com/Vignesh-Karthick-Uthaya-Kumar/UnDebt/blob/main/expoapp/lib/offsetAccounts.ts">offsetAccounts.ts</a> · <a href="https://github.com/Vignesh-Karthick-Uthaya-Kumar/UnDebt/blob/main/expoapp/supabase/migrations/20261108135811_remote_schema.sql">schema migration</a> · <a href="https://github.com/Vignesh-Karthick-Uthaya-Kumar/UnDebt/blob/main/expoapp/supabase/config.toml">Supabase CLI config</a>.</p>
+      <footer>Source of truth: the production branch and its committed migration. See <a href="./dev.html">the proposed dev technical design</a>.</footer>
     </main>
   </body>
 </html>

@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="UnDebt production and proposed design documentation.">
-    <title>UnDebt Design Docs</title>
+    <meta name="description" content="UnDebt architecture, data model, calculation, and release documentation.">
+    <title>UnDebt Technical Design Docs</title>
     <style>
       :root { color-scheme: light; --ink: #172033; --muted: #596579; --brand: #5146e5; --line: #dce2ee; }
       * { box-sizing: border-box; }
@@ -19,19 +19,20 @@
   </head>
   <body>
     <main>
-      <h1>UnDebt Design Docs</h1>
-      <p>Production describes the current <code>main</code> baseline. Proposed describes the current <code>dev</code> design and must not be treated as released behavior.</p>
+      <h1>UnDebt Technical Design</h1>
+      <p>Architecture, runtime interactions, UI behavior, database schema/setup/queries, calculations, assumptions, gaps, and release lifecycle. Written for technical architects, designers, and developers.</p>
+      <p><strong>Branch contract:</strong> <code>main</code> is production; <code>dev</code> is proposed. Dev pages do not describe production behavior until merged and the production set is refreshed.</p>
       <section>
-        <h2>Production — as-is</h2>
-        <p>Architecture, persisted schema, current UI, data flow, calculations, known limitations, and release policy.</p>
+        <h2>Production — as implemented on main</h2>
+        <p>Production architecture and component boundaries, schema and RLS, local/remote setup, SQL operations and inspection queries, current calculations, gaps, and release policy.</p>
         <p><a href="./production.html">Read production design (HTML)</a> · <a href="./production.md">Markdown source</a></p>
       </section>
       <section>
-        <h2>Proposed — dev</h2>
-        <p>Current staged loan-schedule proposal, JSON payloads, validation, projection changes, remaining gaps, and merge path.</p>
+        <h2>Proposed — current dev</h2>
+        <p>Full application context plus staged loan-schedule architecture, UI and data structures, JSON contracts, validation/date semantics, simulation behavior, explicit release blockers, and dev-to-main lifecycle.</p>
         <p><a href="./dev.html">Read proposed design (HTML)</a> · <a href="./dev.md">Markdown source</a></p>
       </section>
-      <footer>Static documentation only. This site does not host the Expo application or deploy Supabase changes.</footer>
+      <footer>Static documentation only. This site does not host the Expo application or apply Supabase migrations. App release and database release remain separate.</footer>
     </main>
   </body>
 </html>

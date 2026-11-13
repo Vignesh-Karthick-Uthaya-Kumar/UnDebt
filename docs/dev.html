@@ -3,73 +3,179 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Proposed UnDebt dev design for staged loan schedules.">
-    <title>UnDebt — Proposed Dev Design</title>
+    <meta name="description" content="UnDebt dev architecture, loan schedules, data model, calculations, and release gates.">
+    <title>UnDebt — Proposed Dev Technical Design</title>
     <style>
-      :root { color-scheme: light; --ink: #172033; --muted: #596579; --brand: #5146e5; --line: #dce2ee; }
+      :root { color-scheme: light; --ink: #172033; --muted: #596579; --brand: #5146e5; --line: #dce2ee; --panel: #fff; }
       * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
       body { margin: 0; background: #f5f7fb; color: var(--ink); font: 16px/1.65 system-ui, sans-serif; }
-      main { max-width: 980px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
-      h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.15; }
-      h2 { margin-top: 2rem; border-bottom: 1px solid var(--line); padding-bottom: .35rem; }
+      main { max-width: 1120px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+      h1 { font-size: clamp(2rem, 5vw, 3.2rem); line-height: 1.1; margin-bottom: .4rem; }
+      h2 { margin-top: 2.4rem; border-bottom: 1px solid var(--line); padding-bottom: .4rem; }
+      h3 { margin-top: 1.6rem; }
       a { color: var(--brand); }
+      nav { display: flex; flex-wrap: wrap; gap: .55rem 1rem; padding: .8rem 1rem; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+      nav a { text-decoration: none; font-size: .9rem; }
       .status { padding: .8rem 1rem; background: #fff1d6; border-radius: 10px; }
-      pre { overflow-x: auto; padding: 1rem; background: #172033; color: #eef0ff; border-radius: 12px; }
+      .card, details { padding: 1rem; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+      .diagram { overflow-x: auto; margin: 1rem 0; padding: .7rem; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+      svg { display: block; min-width: 720px; width: 100%; height: auto; }
+      svg text { fill: var(--ink); font: 15px system-ui, sans-serif; }
+      svg .small { fill: var(--muted); font-size: 12px; }
+      svg .box { fill: #f8f9ff; stroke: #8d87f4; stroke-width: 2; rx: 12; }
+      svg .event { fill: #eaf7ee; stroke: #3a9d5d; stroke-width: 2; }
+      svg .edge { stroke: #596579; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+      table { width: 100%; border-collapse: collapse; min-width: 640px; }
+      th, td { padding: .65rem .8rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      th { background: #f8f9ff; }
+      pre { overflow-x: auto; padding: 1rem; background: #172033; color: #eef0ff; border-radius: 10px; font-size: .9rem; }
       code { overflow-wrap: anywhere; }
+      .note { border-left: 4px solid #d94848; padding: .75rem 1rem; background: #fff0f0; }
+      footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+      @media print { body { background: white; } nav { display: none; } main { max-width: none; } .diagram, .card, details { break-inside: avoid; } }
     </style>
   </head>
   <body>
     <main>
-      <p><a href="./index.html">← Design docs</a> · <a href="./dev.md">Markdown</a> · <a href="./production.html">Production baseline</a></p>
-      <h1>UnDebt — Proposed design</h1>
-      <p class="status"><strong>Status:</strong> Proposed changes on <code>dev</code>, including current in-progress worktree changes. Not production until merged to <code>main</code>. Keep this page and <code>dev.md</code> aligned with material code changes or requested refreshes.</p>
+      <p><a href="./index.html">← Design docs</a> · <a href="./dev.md">Markdown source</a> · <a href="./production.html">Production baseline</a></p>
+      <h1>UnDebt — Proposed dev technical design</h1>
+      <p class="status"><strong>Branch:</strong> <code>dev</code> · Proposed implementation, not production until merged to <code>main</code>. Code is authoritative; this document records current behavior and release gaps.</p>
+      <p>For technical architects, designers, and developers. The <a href="./production.html">production design</a> describes unchanged platform, schema, and current calculation baseline.</p>
+      <nav aria-label="Document contents">
+        <a href="#solution">Solution</a><a href="#ui">UI</a><a href="#data">Data model</a>
+        <a href="#validation">Validation</a><a href="#calculations">Calculations</a><a href="#database">Data flow</a><a href="#gaps">Gaps</a><a href="#release">Release</a>
+      </nav>
 
-      <h2>Solution and architecture</h2>
-      <p>Extend loan setup/projection to support dated repayment stages rather than one recurring payment per loan. Keep the Expo/React Native client, Supabase Auth/Postgres backend, account-row ownership, and current database table. Persist schedules in existing <code>payments</code> and <code>interest_rates</code> JSONB; no database migration is proposed. A pure TypeScript <code>loanSchedules</code> module handles draft creation, date helpers, and validation.</p>
-      <ol>
-        <li>The account modal initializes a schedule draft and restores staged entries when editing.</li>
-        <li>Users define repayment windows (dates, amount, frequency, payment type, optional rate override), interest-only windows, and credit-card interest-free windows/minimum-or-full payment. BNPL has restricted frequency options.</li>
-        <li>Client validation checks dates, amounts/frequencies, overlap, term bounds, and active-term coverage. Save serializes repayment and rate windows into account JSONB through existing Supabase writes.</li>
-        <li>The projection engine processes multiple dated events, accrues interest at monthly boundaries, applies due payments, and preserves existing metrics/chart series. Compact navigation changes to a vertical scrolling sidebar.</li>
-      </ol>
+      <h2 id="solution">1. Solution and architecture</h2>
+      <p>Extend loan setup and projection from one recurring payment to a sequence of dated payment/rate windows. Preserve Expo/React Native, Supabase Auth/Postgres, the <code>accounts</code> table, ownership/RLS, and current summary/chart contracts. The proposal does not add a migration: schedules are encoded in existing <code>payments</code> and <code>interest_rates</code> JSONB arrays.</p>
+      <figure class="diagram">
+        <svg viewBox="0 0 1020 320" role="img" aria-labelledby="dev-arch-title dev-arch-desc">
+          <title id="dev-arch-title">Dev loan schedule architecture</title><desc id="dev-arch-desc">Account modal creates schedule draft; loanSchedules validates; App serializes to Supabase account JSONB; financialProjection simulates and returns metrics to screens.</desc>
+          <defs><marker id="arrow-timeline" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#596579"/></marker></defs>
+          <rect class="box" x="20" y="115" width="160" height="76"/><text x="54" y="145">AccountModal</text><text class="small" x="44" y="168">form + draft state</text>
+          <rect class="box" x="220" y="115" width="170" height="76"/><text x="247" y="145">loanSchedules</text><text class="small" x="256" y="168">date + validation</text>
+          <rect class="box" x="430" y="115" width="145" height="76"/><text x="471" y="145">App.tsx</text><text class="small" x="452" y="168">serialize/write</text>
+          <rect class="event" x="625" y="115" width="175" height="76"/><text x="652" y="145">accounts JSONB</text><text class="small" x="647" y="168">payments + rates</text>
+          <rect class="box" x="850" y="115" width="155" height="76"/><text x="871" y="145">financialProjection</text><text class="small" x="872" y="168">event simulation</text>
+          <path class="edge" d="M180 153 H215"/><path class="edge" d="M390 153 H425"/><path class="edge" d="M575 153 H620"/><path class="edge" d="M800 153 H845"/>
+          <path class="edge" d="M930 195 C900 270 520 270 500 195"/><text class="small" x="630" y="255">projected series and metrics to screens</text>
+        </svg>
+      </figure>
+      <div class="table-wrap"><table><thead><tr><th>Module</th><th>Proposed responsibility</th></tr></thead><tbody>
+        <tr><td><code>AccountModal.tsx</code></td><td>Build/restore repayment draft; expose staged, interest-only, card and BNPL controls; show errors</td></tr>
+        <tr><td><code>loanSchedules.ts</code></td><td>Draft types/defaults, UTC date utilities, schedule validation</td></tr>
+        <tr><td><code>App.tsx</code></td><td>Serialize draft into JSONB; preserve non-schedule activities; reuse account writes</td></tr>
+        <tr><td><code>financialProjection.ts</code></td><td>Parse schedule/rate windows, generate payment events, calculate interest/offset forecasts</td></tr>
+        <tr><td><code>paymentEntries.ts</code></td><td>Existing activity recurrence, historical balances, Save/Spend flow aggregation</td></tr>
+        <tr><td><code>Sidebar.tsx</code></td><td>Scrollable vertical compact navigation</td></tr>
+      </tbody></table></div>
 
-      <h2>Data structures and persisted schema</h2>
-      <p><code>LoanScheduleDraft</code> groups interest-only/free flags and dates, credit-card payment type, and <code>RepaymentScheduleDraft[]</code>. A draft entry contains transient UI ID, amount text, payment type, frequency, start/end dates, same-rate flag, and optional override. IDs in drafts are not database keys. The account JSONB remains source of truth.</p>
-      <pre><code>payments[] = {
-  type: "Principal and Interest" | "Interest Only" | "Min balance" | "Full payment",
-  periodKind?: "interest-only" | "repayment",
-  amount?: number, frequency: string, startDate: "YYYY-MM-DD", endDate?: string | null,
-  sameInterestRate?: boolean, interestRate?: number
-}
-interest_rates[] = { rate: number, date: "YYYY-MM-DD", endDate?: string | null, periodKind?: string }</code></pre>
-      <p>Interest-free periods are stored as dated zero-rate windows. Existing income, transfers, part-payments, bills, and expenses remain in <code>payments</code>; no new table is added.</p>
-
-      <h2>UI and calculation rules</h2>
+      <h2 id="ui">2. UI behavior</h2>
       <ul>
-        <li>Loan forms expose payment type, frequency, dates, and multiple staged schedules. Add/remove controls vary by account type, and validation errors block save.</li>
-        <li>The simulator reads multiple schedule entries. Dated rates apply to their simulated period; otherwise the account rate default applies. It calculates interest on balance net of eligible offset, applies repayment events at generated schedule dates, pays accrued interest for amount-less interest-only entries, pays the remaining balance for full-payment entries, and uses configured amounts for other entries.</li>
-        <li>Monthly repayment summary totals annualized configured amounts across schedules. Existing balance, offset, financial-year, Save/Spend, and chart behavior remains intended.</li>
-        <li>Date helpers use UTC ISO calendar dates and clamp month additions. Validation requires non-overlap and repayment/interest coverage through maturity when an end date exists.</li>
+        <li>General loan forms support one or more repayment windows with amount, payment type, frequency, start/end, and optional rate override. Eligible types can add/remove schedules.</li>
+        <li>Interest-only periods are separate dated ranges. Credit cards expose Min balance/Full payment and an optional 0% period, with normal-rate windows around it.</li>
+        <li>Buy Now Pay Later defaults to fortnightly and offers weekly/fortnightly/monthly/quarterly choices.</li>
+        <li>Compact mode uses a vertical scrollable sidebar. Existing screens, periods, charts, account CRUD, offsets, Save/Spend, and auth remain the product contract.</li>
       </ul>
 
-      <h2>Gaps before production</h2>
-      <ol>
-        <li>Add tests for validation, legacy JSON, event generation, leap/month-end dates, payment ordering, rate boundaries, and projected balances/interest. No runner or financial regression suite is present now.</li>
-        <li>Confirm first-payment timing, day-count/interest accrual, intra-period rate changes, minimum-payment rules, statement dates, and BNPL fee/interest behavior with product requirements. Estimates are not lender-grade.</li>
-        <li>JSONB does not enforce schedule structure; concurrent edits can overwrite arrays. Define handling for malformed legacy entries and duplicate/overlapping ranges.</li>
-        <li>Verify restored legacy schedules, schedule replacement/removal, empty end dates, DST/date boundaries, narrow layouts, accessibility, and save/error flows.</li>
-        <li>Recheck RLS with authenticated and anonymous test users; review deployed overlapping policies/triggers. A future normalized schema requires reviewed migration and backfill.</li>
-        <li>Add reproducible app build/typecheck and automated calculation tests to CI before production readiness. Pages only publishes static documentation.</li>
-      </ol>
+      <h2 id="data">3. Data structures and persisted schema</h2>
+      <p><code>LoanScheduleDraft</code> is transient form state, not a table. It groups interest-only/free flags and dates, credit-card payment type, and <code>RepaymentScheduleDraft[]</code>. Each repayment has a transient UI ID, amount text, payment type, frequency, ISO start/end, same-rate flag, and optional rate override.</p>
+      <pre><code>interface RepaymentScheduleDraft {
+  id: string; amount: string;
+  type: 'Principal and Interest' | 'Interest Only' | 'Min balance' | 'Full payment';
+  frequency: string; startDate: string; endDate: string;
+  sameInterestRate: boolean; interestRate: string;
+}
 
-      <h2>Dev → main and documentation lifecycle</h2>
+interface LoanScheduleDraft {
+  interestOnlyPeriodEnabled: boolean;
+  interestOnlyStartDate: string; interestOnlyEndDate: string;
+  interestFreePeriodEnabled: boolean;
+  interestFreeStartDate: string; interestFreeEndDate: string;
+  creditCardPaymentType: 'Min balance' | 'Full payment';
+  repayments: RepaymentScheduleDraft[];
+}</code></pre>
+      <h3>Example persisted schedule</h3>
+      <pre><code>{
+  "payments": [{
+    "type": "Principal and Interest", "periodKind": "repayment",
+    "amount": 850, "frequency": "Monthly",
+    "startDate": "2027-01-15", "endDate": "2056-12-15",
+    "sameInterestRate": false, "interestRate": 6.1
+  }],
+  "interest_rates": [{
+    "rate": 6.1, "date": "2027-01-15",
+    "endDate": "2056-12-15", "periodKind": "repayment"
+  }]
+}</code></pre>
+      <p>Interest-only entries are stored in <code>payments</code>. Credit-card interest-free windows are <code>interest_rates</code> with <code>rate: 0</code> and <code>periodKind: "interest-free"</code>; normal rate is stored for pre/post windows. Draft IDs are not persisted keys. Existing activity entries remain in <code>payments</code>. Relational schema, RLS, indexes, triggers, and setup SQL are unchanged; see <a href="./production.html#setup">production DB setup</a>.</p>
+
+      <h2 id="validation">4. Validation and date semantics</h2>
       <ol>
-        <li>Implement on <code>dev</code>. With each material behavior change, update <code>dev.md</code> and <code>dev.html</code> in the same change; also refresh them on explicit design requests.</li>
-        <li>Validate platform builds/typechecks, focused tests, create/edit/legacy-data flows, and Supabase policy/migration behavior. State unverified items as gaps.</li>
-        <li>Push to <code>dev</code>; GitHub Actions publishes <code>docs/</code>. Configure repository Pages source as GitHub Actions once.</li>
-        <li>Open reviewed <code>dev → main</code> PR. Update <code>production.md</code> and <code>production.html</code> to describe the exact release in that PR; the workflow enforces this for application-code changes. Merge after checks/review and explicit acceptance or resolution of readiness gaps. The merge updates production docs together with production code.</li>
-        <li>Deploy the Expo app and apply approved Supabase migrations through their release procedures; Git merge and Pages do not deploy either one.</li>
+        <li>Validate ISO loan start; require maturity except for CreditCard; reject end before start.</li>
+        <li>Require at least one repayment; positive amount for non-card, frequency for all, and finite non-negative custom rate.</li>
+        <li>Validate interest-only/free dates, schedule start/end order, loan-term bounds, and pairwise non-overlap across all periods.</li>
+        <li>For dated loans require continuous repayment/interest-period coverage from <code>max(startDate, today)</code> through maturity.</li>
       </ol>
+      <figure class="diagram">
+        <svg viewBox="0 0 900 190" role="img" aria-labelledby="timeline-title timeline-desc">
+          <title id="timeline-title">Example staged loan coverage timeline</title><desc id="timeline-desc">Loan term has a non-overlapping interest-only interval followed by repayment stage one and repayment stage two, with full date coverage.</desc>
+          <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#596579"/></marker></defs>
+          <text x="35" y="35">Loan start</text><text x="790" y="35">Maturity</text>
+          <line x1="55" y1="80" x2="850" y2="80" stroke="#596579" stroke-width="2" marker-end="url(#arrow-timeline)"/>
+          <rect class="event" x="65" y="57" width="170" height="46" rx="8"/><text x="90" y="86">Interest-only</text>
+          <rect class="box" x="240" y="57" width="270" height="46" rx="8"/><text x="330" y="86">Repayment stage 1</text>
+          <rect class="event" x="515" y="57" width="300" height="46" rx="8"/><text x="610" y="86">Repayment stage 2</text>
+          <text class="small" x="220" y="140">Ranges must not overlap; no coverage gaps allowed through maturity.</text>
+        </svg>
+      </figure>
+      <p>Date utilities parse UTC calendar days, reject impossible dates, add days, and clamp month additions. A repayment’s first due date is one full frequency interval after its start date, then recurs from the start anchor. Confirm that convention with product/lender requirements.</p>
+
+      <h2 id="calculations">5. Calculation behavior and assumptions</h2>
+      <p>The local simulator adds monthly interest boundaries and splits intervals at the next generated payment event. Rate segments are duration-weighted inside a month:</p>
+      <pre><code>periodRate = Σ (annualRateSegment / 100 / 12)
+                 × (segmentDuration / monthDuration)
+interest = max(0, balance - offsetBalance) × periodRate
+            + proratedChargeInterest</code></pre>
+      <p>Interest is added before scheduled payment. Additional part-payments are applied after scheduled events, only in the offset-enabled/actual simulation. Projection remains capped at 30 years and existing annual chart samples remain.</p>
+      <div class="table-wrap"><table><thead><tr><th>Payment type</th><th>Current simulator behavior</th><th>Important limitation</th></tr></thead><tbody>
+        <tr><td>Full payment</td><td>Pays simulated balance at each generated due date</td><td>Simplified cycle semantics</td></tr>
+        <tr><td>Interest Only, no amount</td><td>Pays accrued interest since last payment, capped by balance</td><td>Accrual/payment timing requires validation</td></tr>
+        <tr><td>Interest Only, amount present</td><td>Pays configured amount</td><td>Can differ from actual interest accrued</td></tr>
+        <tr><td>Principal and Interest</td><td>Pays configured amount</td><td>No amortization payment solver</td></tr>
+        <tr><td>Min balance</td><td>Uses configured amount or zero</td><td><strong>No minimum-payment formula</strong></td></tr>
+      </tbody></table></div>
+      <p>Monthly repayment summary annualizes configured amounts by frequency and divides by 12; it does not prorate for active schedule windows. Existing balance, cash interest, offset allocation, Save/Spend formulas, account defaults, and 30-year horizon are described in <a href="./production.html#calculations">production calculations</a>.</p>
+
+      <h2 id="database">6. Database and data interactions</h2>
+      <p>Account inserts/updates still write fields on <code>public.accounts</code>; schedule edits replace recognized prior schedule entries while retaining non-schedule activities. Interest-only windows and repayment records go in <code>payments</code>; repayment overrides and card promo periods go in <code>interest_rates</code>. RLS remains the row ownership boundary.</p>
+      <p>The array is read-modify-write JSONB, not a normalized schedule table. Concurrent edits can overwrite data; the DB cannot enforce schedule shape. Legacy object/array parsing and <code>startDate</code>/<code>date</code> aliases are accepted; malformed JSON may be treated as missing and fall back to default rates.</p>
+      <p>There is no dev-only SQL. Use the <a href="./production.html#setup">production setup reference</a> for local Supabase commands, core DDL, CRUD query equivalents, and schema/RLS/trigger inspection. Current app configuration points to one hosted project; do not exercise dev changes against production user data—create a separate staging project/config first.</p>
+
+      <h2 id="gaps">7. Gaps and production gates</h2>
+      <ol>
+        <li class="note"><strong>Blocker:</strong> Min balance has no formula; when no amount is configured the current simulated payment is zero. Implement a specified rule or explicitly exclude it before merge.</li>
+        <li>Define principal-and-interest payment calculation, full-payment timing, lender day-count/compounding, rate change behavior, card statements/minimums, BNPL fees, and first due date.</li>
+        <li>Rate entries store <code>endDate</code>, but current rate selection uses latest start date and does not itself enforce the end. Define gaps/overlaps and validate continuous rates.</li>
+        <li>Add tests for legacy JSON, invalid/leap/month-end dates, schedule overlap/coverage, payment order, rate boundaries, and expected balances/interest.</li>
+        <li>Verify create/edit/restore/replacement and preservation of non-schedule activity, promotional end dates, empty optional values, errors, accessibility, and compact sidebar widths.</li>
+        <li>Run authenticated/anonymous RLS scenarios and review existing overlapping policies/triggers. Add CI app build/typecheck and financial tests; Pages CI is not a product build.</li>
+        <li>Create a distinct staging Supabase project/configuration before shared testing; the client currently has no dev/prod project selection.</li>
+      </ol>
+      <p><strong>Acceptance:</strong> product signs off payment semantics; regression cases pass; legacy rows still load/edit; JSON activities are preserved; visual/accessibility review passes; production docs are updated to match exact merged behavior.</p>
+
+      <h2 id="release">8. Dev → main release and documentation lifecycle</h2>
+      <ol>
+        <li><code>dev</code> is proposed/integration; <code>main</code> is production. Update dev MD and HTML with each material app change; the workflow enforces both.</li>
+        <li>Validate via <code>cd expoapp &amp;&amp; npx tsc --noEmit</code>, focused tests, app/web checks, and authenticated RLS-backed create/edit/delete scenarios.</li>
+        <li>Open reviewed <code>dev → main</code> PR; update production MD and HTML to the exact release. The workflow enforces both on app-code PRs.</li>
+        <li>Merge after review and accepted release gates. Merge updates production code and docs together; it does not deploy app binaries or apply database migrations.</li>
+        <li>Static Pages site is published from branch <code>dev</code>, path <code>/docs</code>, at <a href="https://vignesh-karthick-uthaya-kumar.github.io/UnDebt/">UnDebt design docs</a>. The Actions workflow also validates documentation and publishes on dev pushes. Application and DB releases remain separate.</li>
+      </ol>
+      <p><strong>Code references:</strong> <a href="https://github.com/Vignesh-Karthick-Uthaya-Kumar/UnDebt/blob/dev/expoapp/components/AccountModal.tsx">AccountModal.tsx</a> · <a href="https://github.com/Vignesh-Karthick-Uthaya-Kumar/UnDebt/blob/dev/expoapp/lib/loanSchedules.ts">loanSchedules.ts</a> · <a href="https://github.com/Vignesh-Karthick-Uthaya-Kumar/UnDebt/blob/dev/expoapp/App.tsx">App.tsx</a> · <a href="https://github.com/Vignesh-Karthick-Uthaya-Kumar/UnDebt/blob/dev/expoapp/lib/financialProjection.ts">financialProjection.ts</a> · <a href="https://github.com/Vignesh-Karthick-Uthaya-Kumar/UnDebt/blob/dev/.github/workflows/docs-pages.yml">Pages workflow</a>.</p>
+      <footer>Source: current dev code. See <a href="./production.html">production baseline and setup reference</a>.</footer>
     </main>
   </body>
 </html>
