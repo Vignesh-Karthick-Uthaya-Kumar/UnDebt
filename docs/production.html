@@ -205,24 +205,68 @@ where tgrelid = 'public.accounts'::regclass and not tgisinternal;</code></pre>
       <p>All projections are client-side estimates; they are not lender quotes, reconciled transaction history, or financial advice.</p>
       <h3>Activity and balance reconstruction</h3>
       <ul>
-        <li>Dates are ISO <code>YYYY-MM-DD</code>; no frequency means one-off. Recurrence supports days, weeks, fortnights, months, quarters, half-years, and years. Day intervals use fixed day counts; month intervals preserve the start day and clamp to month-end.</li>
-        <li>As-of balance = stored balance plus/minus eligible activities from <code>max(start_date || created_at-date, activity-start-date)</code>. Income adds; outflow sign depends on account/type. Linked Payment/Part Payment mirrors configured flows between accounts.</li>
+        <li>Dates are ISO <code>YYYY-MM-DD</code>; no frequency means one-off. Recurrence supports days, weeks, fortnights, months, quarters, half-years, and years. Day intervals use fixed day counts; monthly counting anchors to original start and clamps to month-end. Recurring end date is inclusive; no-repeat counts once on start date. Unknown frequency is monthly for activity counting; literal “One-time” is one-off for forecast events but monthly in activity counting.</li>
+        <li>As-of balance = stored balance plus/minus <code>amount × occurrenceCount</code> from <code>max(start_date || created_at-date, activity-start-date)</code> through the requested date. Income adds; Payment debits source and credits linked account; Part Payment debits source and loan; ordinary spending debits cash but increases card/BNPL liability. Other account/activity combinations are not reconciled.</li>
         <li>Invalid dates in public summary/projection requests throw. Some malformed JSON parsers return no entries and fall back to defaults.</li>
       </ul>
+      <p class="note"><strong>Baseline ambiguity:</strong> there is no <code>balance_as_of</code> field. The algorithm adds eligible historical activities to the persisted balance. If a user enters a current balance, recurring past activity can be counted again.</p>
+      <p>For a recurring activity, <code>N(a;s,e) = max(0, C(e) − C(s−1 day))</code>, where <code>C(d)</code> counts anchored occurrences from entry start through <code>min(d,endDate)</code>. Day/week intervals use fixed day counts; month recurrence uses the original day clamped per month. A no-repeat entry counts once only when its start is in the window.</p>
       <h3>Loan interest and cash projections</h3>
       <pre><code>periodRate = Σ (annualRateSegment / 100 / periodsPerYear)
                  × (segmentDuration / scheduledPeriodDuration)
 interest = max(0, loanBalance - eligibleOffsetBalance) × periodRate
             + proratedChargeInterest</code></pre>
-      <p>The production loan simulator uses one saved scheduled repayment per loan at its configured frequency. It adds interest/charges, applies the scheduled amount, then linked additional payments. Rate changes are duration-prorated inside that interval; this is not daily compounding.</p>
-      <p>Cash/account interest uses annual windows, prorated by rate segments and applied only to positive balances. Linked offset funds do not separately earn account interest in forecasts. Offset allocation is proportional to linked loan balances and bounded by each loan balance. The horizon is at most 30 years; charts sample annual balances. Default projection horizon follows the final non-credit loan payoff when present, otherwise 30 years.</p>
+      <p>The production loan simulator reads the first <code>payments</code> item as schedule and cadence, ignores its stored start date, and starts the next due payment one frequency interval after the projection cursor (today or FY start), then repeats from that cursor. It adds interest/charges, applies the fixed scheduled amount, then linked additional payments. Payment <code>endDate</code> gates due dates; rate <code>endDate</code> is ignored. Rate changes are duration-prorated inside the interval; this is not daily compounding. The loan-table rate is the first stored rate entry, not necessarily today's active rate.</p>
+      <p>Cash/account interest uses anniversary windows: each rate segment contributes <code>annualRate/100 × segmentDuration/fullAnniversaryWindowDuration</code> to a simple-interest factor; even a partial final window uses the full anniversary duration as denominator. The window adds <code>max(0, balance) × (factor − 1)</code>. Cash-flow events split and restart windows. Linked offset cash does not earn deposit interest in forecasts. Offset allocation is proportional to linked loans' starting balances; partial offset scales cash, capped offset caps the allocation by a share of each loan's starting balance. Allocation is not recomputed from declining simulated debt. Horizon is at most 30 years; charts sample annual balances.</p>
       <h3>Summary metrics and hard-coded defaults</h3>
       <ul>
-        <li>Net worth = assets − debt. Scheduled monthly payment summary = payment amount × periods per year ÷ 12.</li>
-        <li>Interest saved = scheduled/no-offset interest − offset/actual interest, floored at zero.</li>
-        <li>Save/Spend periods are one–twelve months or financial year; July is the default year start. Spend available = starting cash + projected income; after-spend = available − bills/expenses.</li>
+        <li>Net worth = assets − debt. Scheduled monthly run-rate = payment amount × frequency periods per year ÷ 12 (daily 365, weekly 52, fortnightly 26, monthly 12, quarterly 4, half-yearly 2, annual 1).</li>
+        <li>Loan screen interest saved = max(0, scheduled interest − actual interest); actual includes offsets and additional payments. This differs from the simulator's separate offset-only comparison.</li>
+        <li>Spend available = starting transaction balances + Income occurrences; spend = Bill Payment + Expense occurrences; after-spend = available − spend. Payment transfers are counted separately but not deducted.</li>
+        <li>Save income/saved values are selected-period occurrence totals. “Cash at period end” reuses Spend available: no savings transfer, expense, or deposit interest is included. Period-start cash is calculated separately, so the two are not opening/closing ledger balances.</li>
+        <li>Month window is as-of + 1 day through addMonths(as-of, N), inclusive; FY is the entire selected year, not clipped to today. July is default.</li>
         <li>Example-coded defaults: base 4.85%; home +2.10%, car +2.05%, personal +3.65%, card +15.55%, BNPL −4.85%; savings/checking subtract 2.50%. These are static constants, not a live benchmark feed.</li>
       </ul>
+
+      <h3 id="numeric-ui">5.1 Numeric UI inventory and data lineage</h3>
+      <p>Components format supplied values; they do not calculate them. Currency is hard-coded as <code>$</code>, independent of the Settings text field. Activity row amounts are per-occurrence inputs; metrics aggregate occurrences.</p>
+      <div class="table-wrap"><table><thead><tr><th>Screen / component</th><th>Numeric output and exact source</th></tr></thead><tbody>
+        <tr><td>Overview cards</td><td>Debt = sum App's projected-start loan balances; assets = sum projected-start transaction balances; net worth = assets − debt. FY mode uses FY-start balances despite “Current total” labels.</td></tr>
+        <tr><td>Overview chart</td><td>Annual loan and transaction series; total-loan/assets lines sum account samples. It is not a net-worth series.</td></tr>
+        <tr><td>Loans summary</td><td>Outstanding = starting debt sum; “active loans” is actually all loan rows with no payoff/end-date filter. Monthly figures use the run-rate formula above. Balance/interest use cumulative samples at selected year N; saved interest compares scheduled with actual (offset + extra-payment) runs.</td></tr>
+        <tr><td>Loan table/chart</td><td>Table balance is reconstructed today; rate is first JSON rate; payment/frequency are <code>payments[0]</code>; end date is stored end date. Chart samples the last event balance at or before start + N calendar months, then joins annual samples with straight segments.</td></tr>
+        <tr><td>Accounts cards</td><td>Total = current transaction balances. “Interest-earning” = positive balances not linked to any active loan. “Offset” = full positive linked cash, not effective partial/capped offset. Projected total = series sum at year N; growth subtracts today's total even in FY mode.</td></tr>
+        <tr><td>Accounts table/chart</td><td>Row balance = reconstructed today; displayed rate = first stored rate, not active rate. Chart totals selected account series; all series are annual projections.</td></tr>
+        <tr><td>Loan management cards</td><td>Start cash = transaction balances at projection start. Offset start/end = full positive linked account cash. Additional payments = Part Payment occurrences on transaction rows in date window (no linked-loan ID filter). Interest saved = scheduled − actual cumulative interest at year N, floored at zero.</td></tr>
+        <tr><td>Loan management lists/forms</td><td>Payment row shows raw per-occurrence amount and all records, not window totals. Offset balance is reconstructed today; Partial percentage scales cash, Capped percentage limits allocated loan balance. Loan balances in link editor use current balances.</td></tr>
+        <tr><td>Save cards/chart/list</td><td>Income and saved = selected-window occurrence sums for Income/Payment. Chart width = value/max(income,saved). Period-start cash is a separate transaction forecast; period-end cash is Spend's available figure, not closing cash. Row amount is input; record count counts JSON entries, not recurrences.</td></tr>
+        <tr><td>Spend cards/chart/list</td><td>Available = starting balances + Income; bills/spend = Bill Payment + Expense occurrences; remaining = available − spend. Bar width = max(0,value/max(0,available,bills,expenses)); list includes all records, not just window matches; Part Payments are excluded from spend totals.</td></tr>
+        <tr><td>Sidebar / period pickers</td><td>Badges count account records, regardless of payoff/end-date, and show only above zero; Help's 01–05 and schedule labels are static/order numbers. Loan period = 1–30 years; auto = ceiling of latest non-credit-loan modeled finish duration, clamped 1–30 (30 absent non-credit loans). Unpaid loan reaching maturity still counts as modeled finish. FY choices show prior/current/next. Save/Spend allows 1–12 months or an FY.</td></tr>
+        <tr><td>Settings / Help / profile / date picker</td><td>Financial-year month is a zero-based month index that changes period boundaries. Currency is editable text only and has no calculation/formatting effect. Help numbers are static; calendar digits select dates; profile has no calculated financial number.</td></tr>
+        <tr><td>MetricCard / forms</td><td>MetricCard only renders formatted props. Balance, rate, payment, amount, and percentage fields are user inputs/presets, not formulas. Currency setting does not affect output.</td></tr>
+      </tbody></table></div>
+      <p><code>LoanProjectionSummary</code> only renders supplied props: scheduled tile = scheduled-only balance/interest and scheduled run-rate; “With extra payments” = actual balance/interest and scheduled + extra run-rates; saved = floored difference in scheduled/actual cumulative interest. Chart y-axis takes the maximum visible series value through selected year, rounds up to <code>ceil(max / 10^floor(log10(max))) × 10^floor(log10(max))</code>, and labels 0%, 50%, and 100% as rounded dollars. Lines connect annual samples, not monthly/event paths.</p>
+      <h3>5.2 Preset values are static, not live calculations</h3>
+      <p>Presets are applied when selecting an account type. Base 4.85% is hard-coded; APR = base plus/minus configured margin.</p>
+      <div class="table-wrap"><table><thead><tr><th>Type</th><th>Balance</th><th>Preset APR</th><th>Payment / term</th></tr></thead><tbody>
+        <tr><td>Home loan</td><td>$750,000</td><td>6.95%</td><td>blank / monthly / 30 years</td></tr>
+        <tr><td>Car loan</td><td>$28,000</td><td>6.90%</td><td>blank / monthly / 5 years</td></tr>
+        <tr><td>Personal loan</td><td>$12,000</td><td>8.50%</td><td>$350 / monthly / 5 years</td></tr>
+        <tr><td>Credit card</td><td>$2,500</td><td>20.40%</td><td>$150 / monthly / no preset maturity</td></tr>
+        <tr><td>BNPL</td><td>$400</td><td>0.00%</td><td>$100 / fortnightly / 6 months</td></tr>
+        <tr><td>Savings / Checking</td><td>$5,000 / $1,500</td><td>2.35%</td><td>no payment or term</td></tr>
+        <tr><td>Investment / Transaction</td><td>blank</td><td>blank</td><td>no preset</td></tr>
+      </tbody></table></div>
+      <h3>5.3 Calculation limitations that change visible values</h3>
+      <ol>
+        <li>Stored balance is treated as a baseline plus eligible historical activities; there is no balance-as-of date. Current statement balances may double-count past recurring entries.</li>
+        <li>Activity counting anchors monthly dates to original start (Jan 30 → Feb 28 → Mar 30); forecast generation advances from prior date (Jan 30 → Feb 28 → Mar 31). Counts/dates can diverge.</li>
+        <li>Rate <code>endDate</code> is not enforced; before the first dated rate, an existing rate array yields 0%. UI rate labels show the first array item.</li>
+        <li>Loan interest uses frequency-period simple prorating, then charges, scheduled payment, additional payment. Extra payment only reduces interest after its forecast interval; offset is sampled at interval end and used for the whole interval.</li>
+        <li>Offset proportions and caps use starting debt; offset cash does not accrue deposit interest. “Offset balance” cards do not show effective interest-offset principal.</li>
+        <li>Annual chart samples use calendar +12-month dates. Offset end-date calculations can use +365.2425 days; FY loan samples at index 1 are next FY start, while FY end cash is the prior day.</li>
+        <li>Negative transaction balances can appear in historical totals, but annual series clamp initial cash to zero; loan simulation also clamps starting debt while some debt cards sum signed balances. No taxes, inflation, conversion, bank reconciliation, full fee/charge model, or cash-availability constraint is applied.</li>
+      </ol>
 
       <h2 id="gaps">6. Gaps and technical risks</h2>
       <ul>

@@ -131,7 +131,7 @@ interface LoanScheduleDraft {
           <text class="small" x="220" y="140">Ranges must not overlap; no coverage gaps allowed through maturity.</text>
         </svg>
       </figure>
-      <p>Date utilities parse UTC calendar days, reject impossible dates, add days, and clamp month additions. A repayment’s first due date is one full frequency interval after its start date, then recurs from the start anchor. Confirm that convention with product/lender requirements.</p>
+      <p>Date utilities parse UTC calendar days, reject impossible dates, add days, and clamp month additions. A repayment’s first due date is one full frequency interval after its start date, then advances from each prior due date. Confirm this convention with product/lender requirements; month-end clamping can drift.</p>
 
       <h2 id="calculations">5. Calculation behavior and assumptions</h2>
       <p>The local simulator adds monthly interest boundaries and splits intervals at the next generated payment event. Rate segments are duration-weighted inside a month:</p>
@@ -148,6 +148,52 @@ interest = max(0, balance - offsetBalance) × periodRate
         <tr><td>Min balance</td><td>Uses configured amount or zero</td><td><strong>No minimum-payment formula</strong></td></tr>
       </tbody></table></div>
       <p>Monthly repayment summary annualizes configured amounts by frequency and divides by 12; it does not prorate for active schedule windows. Existing balance, cash interest, offset allocation, Save/Spend formulas, account defaults, and 30-year horizon are described in <a href="./production.html#calculations">production calculations</a>.</p>
+
+      <h3 id="numeric-components">5.1 Screen/component numeric audit (dev)</h3>
+      <p>The complete shared screen-by-screen data lineage, account presets, activity formulas, chart scaling, and cross-screen inconsistencies are in the <a href="./production.html#numeric-ui">production numeric UI inventory</a>. Those calculations remain in force on dev except for loan schedule changes below.</p>
+      <div class="table-wrap"><table><thead><tr><th>Screen / component</th><th>Dev numeric path and meaning</th></tr></thead><tbody>
+        <tr><td>Overview cards / combined chart</td><td>Same formulas as production. Card debt/assets are projection-start balances (today or FY start); chart uses dev loan simulations and existing transaction series.</td></tr>
+        <tr><td>Loans summary</td><td>Outstanding is starting debt sum, not a settlement quote. Selected-year balances and cumulative interest come from scheduled-only and actual simulations. Interest saved = scheduled minus actual; actual includes offsets and additional payments.</td></tr>
+        <tr><td>Monthly repayment summary</td><td>Σ(amount × periodsPerYear) / 12 across every parsed schedule. Multipliers: daily 365, weekly 52, fortnightly 26, monthly 12, quarterly 4, half-yearly 2, annual 1; unknown frequency defaults monthly. Active dates and payment type are ignored. Missing amounts—including default card Min balance—contribute zero; Full payment can pay a balance but still contribute zero here.</td></tr>
+        <tr><td>Loan table</td><td>Balance remains as-of-today; rate is first JSON rate. Payment/frequency still use <code>payments[0]</code>, not first recognized schedule. Dev places retained activities before the new schedules, so an activity or amount-less interest-only entry can be displayed as the scheduled loan payment.</td></tr>
+        <tr><td>Loan chart</td><td>Annual samples of dev event-simulated and scheduled-only balances, connected by straight lines. Schedule changes within a year are not shown as event detail.</td></tr>
+        <tr><td>Accounts / Loan management / Save / Spend / sidebar / pickers</td><td>No calculation changes from production; use its numeric inventory. Linked cash projections still earn no interest and offset cards report linked cash rather than effective capped/partial interest-offset principal.</td></tr>
+      </tbody></table></div>
+
+      <h3>5.2 Dev loan event formulas and order</h3>
+      <p>Each loan starts with the balance supplied at projection start. The next interval boundary is the earliest of one calendar month, next schedule payment due date, or maturity/horizon. A schedule's first due date is one full frequency after its own start date; later dates advance from the prior due date. Monthly interest boundaries do not imply monthly payment cadence.</p>
+      <pre><code>periodRate = Σ [(annualRate_i / 100 / 12)
+                × overlapDuration_i / (nextMonthlyBoundary − cursor)]
+baseInterest = max(0, simulatedBalance − offsetAtNext) × periodRate
+chargeInterest = Σ [charge × periodRate × (next − chargeDate) / (next − cursor)]
+interest = baseInterest + chargeInterest</code></pre>
+      <ol>
+        <li>Sample offset at the interval end and accrue base interest for the full interval.</li>
+        <li>Add dated credit-card/BNPL Bill Payment and Expense charges and prorated charge interest.</li>
+        <li>At a scheduled due date, pay the lesser of balance and: whole balance for Full payment; accrued interest for amount-less Interest Only; configured amount otherwise (Min balance included). The optional interest-only-period form itself serializes an amount-less Interest Only entry, parsed as a payment schedule—not only as a rate/term flag.</li>
+        <li>In actual/offset-enabled simulation only, apply linked Part Payment occurrences after the scheduled payment. Events earlier in the interval still reduce the loan only at interval end.</li>
+        <li>Record balance and cumulative metrics; values at or below $0.005 become zero.</li>
+      </ol>
+      <p>Latest rate start date not after the segment is used. A stored rate end date is not enforced; with a rate array but no started entry, selected rate is zero; without a rate array, first account rate is the fallback. The charge-interest calculation applies the interval's blended rate, rather than recalculating the exact rate segments after each charge.</p>
+
+      <h3>5.3 Loan inputs are not amortization formulas</h3>
+      <div class="table-wrap"><table><thead><tr><th>Input/type</th><th>Current simulator behavior and gap</th></tr></thead><tbody>
+        <tr><td>Principal and Interest</td><td>Uses the amount entered literally; no principal/rate/term solver.</td></tr>
+        <tr><td>Interest Only, blank amount</td><td>Pays accumulated simulated interest at generated due events, not a lender's daily-calculated due.</td></tr>
+        <tr><td>Interest Only, amount supplied</td><td>Pays that entered amount even if above or below accrued interest.</td></tr>
+        <tr><td>Min balance</td><td>Uses configured amount or zero; no minimum percentage/floor/statement-balance rule. Card form has no amount field; default card schedule is blank, so default Min balance pays zero.</td></tr>
+        <tr><td>Full payment</td><td>Pays the entire simulated balance at each event; no statement cycle, grace period, fees, or payment waterfall.</td></tr>
+        <tr><td>BNPL</td><td>$100 fortnightly is a static form preset, not balance/term-derived; default rate is 0% from static inputs. Fees are not inferred.</td></tr>
+      </tbody></table></div>
+      <p>The introductory interest-only entry uses the first repayment's frequency; it generates its first due date one full frequency after the period start and repeats through the configured end date. The exact intended lender timing for its first/last due events is not separately specified.</p>
+      <h3>5.4 Dev-specific calculation omissions</h3>
+      <ol>
+        <li>Payment summary annualizes every schedule regardless of active date range or type; extra-payment run-rate is not truncated at payoff.</li>
+        <li>Monthly recurrence generation advances from the prior date (Jan 30 → Feb 28 → Mar 31), while activity counting anchors to original date (Jan 30 → Feb 28 → Mar 30).</li>
+        <li>Schedule validator checks date coverage/non-overlap, but the calculator still ignores rate-window end dates; define boundaries and golden tests for promo periods, charges, same-day events, and month ends.</li>
+        <li>Interest is monthly simple prorating, not APR-to-APY conversion, daily accrual, contractual day count, or daily compounding. Offset is sampled at interval end and applied for the whole interval.</li>
+        <li>Shared production issues remain: balance baseline ambiguity, unspent transfers in Spend, Save end-cash wiring, first-rate display, differing projection/FY cutoffs, and inconsistent negative-balance handling. See <a href="./production.html#numeric-ui">full shared audit</a>.</li>
+      </ol>
 
       <h2 id="database">6. Database and data interactions</h2>
       <p>Account inserts/updates still write fields on <code>public.accounts</code>; schedule edits replace recognized prior schedule entries while retaining non-schedule activities. Interest-only windows and repayment records go in <code>payments</code>; repayment overrides and card promo periods go in <code>interest_rates</code>. RLS remains the row ownership boundary.</p>
